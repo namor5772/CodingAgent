@@ -174,10 +174,28 @@ All apps aim to match:
 - Default **client** size 400x200 and minimum **client** size 300x150 (Win32 converts client to outer size with `AdjustWindowRectEx`; macOS uses `contentRect` / `setContentMinSize` so chrome does not shrink the canvas vs Tk)
 - ~50 ms frame timer, shared walk-cycle math and scaling
 - Bundled icon for the window and Desktop shortcuts (`.ico` on Windows, `.icns` on macOS)
+- Window geometry (position/size) is restored on launch and saved on close
 
 Windows C++ draws with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, hat, arms, legs).
 
 macOS C++ draws with Core Graphics in an `NSView` (`drawRect:`), round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order.
+
+## Window geometry persistence
+
+Each implementation remembers its own window **position and client size** across launches (JSON under a per-user config directory). Python and C++ **do not share** the same file, so moving or resizing one app does not affect the other.
+
+| App | Config file |
+|-----|-------------|
+| Python (`hello_world.py`) | `hello_world_geometry.json` |
+| C++ (Win32 / macOS) | `hello_world_cpp_geometry.json` |
+
+| OS | Directory |
+|----|-----------|
+| Windows | `%LOCALAPPDATA%\CodingAgent\` (typically `AppData\Local\CodingAgent`) |
+| macOS | `~/Library/Application Support/CodingAgent/` |
+| Other (Python) | `$XDG_CONFIG_HOME/CodingAgent/` or `~/.config/CodingAgent/` |
+
+Invalid, too-small, or off-screen restored values fall back to the default 400x200 client size (centered when possible).
 
 ## Notes
 

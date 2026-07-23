@@ -12,6 +12,8 @@
 
 #include <windows.h>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -20,6 +22,15 @@ constexpr int kDefaultWidth = 400;
 constexpr int kDefaultHeight = 200;
 constexpr int kMinWidth = 300;
 constexpr int kMinHeight = 150;
+
+// Client size + outer top-left position (same fields as the Python JSON config).
+struct WindowGeometry {
+    int x = 0;
+    int y = 0;
+    int w = kDefaultWidth;
+    int h = kDefaultHeight;
+    bool valid = false;
+};
 
 // Match hello_world.py: bg #1a1a2e, fg #eaeaea, hat #c9a227
 constexpr COLORREF kBgColor = RGB(0x1a, 0x1a, 0x2e);
@@ -84,6 +95,145 @@ std::wstring ExeDirectory() {
         return L".";
     }
     return full.substr(0, slash);
+}
+
+// %LOCALAPPDATA%\CodingAgent\hello_world_cpp_geometry.json (C++ only; Python uses
+// hello_world_geometry.json in the same folder so each app keeps its own size/pos).
+std::wstring GeometryConfigPath() {
+    wchar_t dir[MAX_PATH] = {};
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH);
+    std::wstring base;
+    if (n > 0 && n < MAX_PATH) {
+        base.assign(dir, n);
+    } else {
+        wchar_t profile[MAX_PATH] = {};
+        const DWORD np = GetEnvironmentVariableW(L"USERPROFILE", profile, MAX_PATH);
+        if (np > 0 && np < MAX_PATH) {
+            base.assign(profile, np);
+            base += L"\\AppData\\Local";
+        } else {
+            base = L".";
+        }
+    }
+    return base + L"\\CodingAgent\\hello_world_cpp_geometry.json";
+}
+
+bool EnsureParentDirectory(const std::wstring& filePath) {
+    const size_t slash = filePath.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) {
+        return true;
+    }
+    const std::wstring dir = filePath.substr(0, slash);
+    if (dir.empty()) {
+        return true;
+    }
+    // CreateDirectoryW fails with ERROR_ALREADY_EXISTS if present — that is fine.
+    if (CreateDirectoryW(dir.c_str(), nullptr)) {
+        return true;
+    }
+    const DWORD err = GetLastError();
+    return err == ERROR_ALREADY_EXISTS;
+}
+
+WindowGeometry LoadGeometry() {
+    WindowGeometry g{};
+    const std::wstring path = GeometryConfigPath();
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, path.c_str(), L"rb") != 0 || !fp) {
+        return g;
+    }
+    char buf[512] = {};
+    const size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    if (n == 0) {
+        return g;
+    }
+    buf[n] = '\0';
+
+    int x = 0, y = 0, w = 0, h = 0;
+    // Minimal JSON field scan — matches the Python writer keys.
+    const char* px = strstr(buf, "\"x\"");
+    const char* py = strstr(buf, "\"y\"");
+    const char* pw = strstr(buf, "\"w\"");
+    const char* ph = strstr(buf, "\"h\"");
+    if (!px || !py || !pw || !ph) {
+        return g;
+    }
+    if (sscanf_s(px, "\"x\"%*[^0-9-]%d", &x) != 1) {
+        return g;
+    }
+    if (sscanf_s(py, "\"y\"%*[^0-9-]%d", &y) != 1) {
+        return g;
+    }
+    if (sscanf_s(pw, "\"w\"%*[^0-9-]%d", &w) != 1) {
+        return g;
+    }
+    if (sscanf_s(ph, "\"h\"%*[^0-9-]%d", &h) != 1) {
+        return g;
+    }
+    if (w < kMinWidth || h < kMinHeight || w > 20000 || h > 20000) {
+        return g;
+    }
+    if (x < -100000 || x > 100000 || y < -100000 || y > 100000) {
+        return g;
+    }
+    g.x = x;
+    g.y = y;
+    g.w = w;
+    g.h = h;
+    g.valid = true;
+    return g;
+}
+
+void SaveGeometry(const WindowGeometry& g) {
+    if (g.w < kMinWidth || g.h < kMinHeight) {
+        return;
+    }
+    const std::wstring path = GeometryConfigPath();
+    if (!EnsureParentDirectory(path)) {
+        return;
+    }
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, path.c_str(), L"wb") != 0 || !fp) {
+        return;
+    }
+    std::fprintf(fp,
+                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d\n}\n",
+                 g.x, g.y, g.w, g.h);
+    fclose(fp);
+}
+
+void SaveGeometryFromHwnd(HWND hwnd) {
+    RECT wr = {};
+    RECT cr = {};
+    if (!GetWindowRect(hwnd, &wr) || !GetClientRect(hwnd, &cr)) {
+        return;
+    }
+    // Skip save while minimized — coords are not useful.
+    if (IsIconic(hwnd)) {
+        return;
+    }
+    WindowGeometry g{};
+    g.x = wr.left;
+    g.y = wr.top;
+    g.w = cr.right - cr.left;
+    g.h = cr.bottom - cr.top;
+    // If maximized, still persist the restored size would be nicer, but matching
+    // Python (current outer frame) is enough for this demo.
+    if (g.w < kMinWidth) {
+        g.w = kMinWidth;
+    }
+    if (g.h < kMinHeight) {
+        g.h = kMinHeight;
+    }
+    g.valid = true;
+    SaveGeometry(g);
+}
+
+bool GeometryOnScreen(int outerX, int outerY, int /*outerW*/, int /*outerH*/) {
+    // Require the window's top-left (with a small inset) to land on some monitor.
+    const POINT pt = {outerX + 20, outerY + 20};
+    return MonitorFromPoint(pt, MONITOR_DEFAULTTONULL) != nullptr;
 }
 
 void TryLoadIcons(HINSTANCE instance) {
@@ -365,6 +515,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
 
+    case WM_CLOSE:
+        SaveGeometryFromHwnd(hwnd);
+        DestroyWindow(hwnd);
+        return 0;
+
     case WM_DESTROY:
         KillTimer(hwnd, kTimerId);
         PostQuitMessage(0);
@@ -403,19 +558,30 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCmd) {
     constexpr DWORD kWindowStyle = WS_OVERLAPPEDWINDOW;
     constexpr DWORD kWindowExStyle = 0;
 
-    // CreateWindowEx width/height are outer; request client 400x200 to match Tk geometry.
-    int outerW = kDefaultWidth;
-    int outerH = kDefaultHeight;
-    if (!ClientSizeToOuter(kWindowStyle, kWindowExStyle, kDefaultWidth, kDefaultHeight,
-                           &outerW, &outerH)) {
+    // CreateWindowEx width/height are outer; request client size to match Tk geometry.
+    int clientW = kDefaultWidth;
+    int clientH = kDefaultHeight;
+    const WindowGeometry saved = LoadGeometry();
+    if (saved.valid) {
+        clientW = saved.w;
+        clientH = saved.h;
+    }
+
+    int outerW = clientW;
+    int outerH = clientH;
+    if (!ClientSizeToOuter(kWindowStyle, kWindowExStyle, clientW, clientH, &outerW, &outerH)) {
         CleanupGlobals();
         return 1;
     }
 
     RECT work = {};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    const int x = work.left + ((work.right - work.left) - outerW) / 2;
-    const int y = work.top + ((work.bottom - work.top) - outerH) / 2;
+    int x = work.left + ((work.right - work.left) - outerW) / 2;
+    int y = work.top + ((work.bottom - work.top) - outerH) / 2;
+    if (saved.valid && GeometryOnScreen(saved.x, saved.y, outerW, outerH)) {
+        x = saved.x;
+        y = saved.y;
+    }
 
     HWND hwnd = CreateWindowExW(
         kWindowExStyle,

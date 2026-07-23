@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -13,6 +15,90 @@ FG = "#eaeaea"
 HAT = "#c9a227"  # muted gold brim/crown accent
 FRAME_MS = 50
 WALK_SPEED = 2.4  # px per frame at default scale baseline
+DEFAULT_WIDTH = 400
+DEFAULT_HEIGHT = 200
+MIN_WIDTH = 300
+MIN_HEIGHT = 150
+
+
+def _config_path() -> Path:
+    """Per-user geometry file for the Python app only (not shared with C++).
+
+    Outside the repo: LocalAppData / XDG / ~/Library Application Support.
+    C++ clones use hello_world_cpp_geometry.json in the same directory.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "CodingAgent" / "hello_world_geometry.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "CodingAgent" / "hello_world_geometry.json"
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(xdg) / "CodingAgent" / "hello_world_geometry.json"
+
+
+def load_geometry() -> dict[str, int] | None:
+    """Return {x, y, w, h} client geometry if the config is valid, else None."""
+    path = _config_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        x = int(data["x"])
+        y = int(data["y"])
+        w = int(data["w"])
+        h = int(data["h"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if w < MIN_WIDTH or h < MIN_HEIGHT:
+        return None
+    # Reject absurd values (corrupt file / multi-monitor gone wrong).
+    if abs(x) > 100_000 or abs(y) > 100_000 or w > 20_000 or h > 20_000:
+        return None
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def save_geometry(x: int, y: int, w: int, h: int) -> None:
+    path = _config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _parse_geometry(geo: str) -> tuple[int, int, int, int] | None:
+    """Parse Tk geometry 'WxH+X+Y' (X/Y may use '-' for negative)."""
+    try:
+        x_sep = -1
+        for i, ch in enumerate(geo):
+            if ch in "+-" and i > 0 and geo[i - 1].isdigit():
+                # First sign after WxH separates width/height from x.
+                # Require the left side to contain 'x' so we don't trip on nothing.
+                if "x" in geo[:i]:
+                    x_sep = i
+                    break
+        if x_sep < 0:
+            return None
+        wh = geo[:x_sep]
+        rest = geo[x_sep:]
+        w_str, _, h_str = wh.partition("x")
+        w = int(w_str)
+        h = int(h_str)
+        # rest is like "+120+80", "-10+20", "+120-40", "-10-20"
+        i = 1  # skip first sign
+        while i < len(rest) and rest[i] not in "+-":
+            i += 1
+        if i >= len(rest):
+            return None
+        x = int(rest[:i])
+        y = int(rest[i:])
+        return x, y, w, h
+    except ValueError:
+        return None
 
 
 def walk_pose(phase: float) -> dict[str, float]:
@@ -51,9 +137,14 @@ class WalkerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Hello World")
-        self.root.geometry("400x200")
-        self.root.minsize(300, 150)
+        self.root.minsize(MIN_WIDTH, MIN_HEIGHT)
         self.root.configure(bg=BG)
+
+        saved = load_geometry()
+        if saved is not None:
+            self.root.geometry(f"{saved['w']}x{saved['h']}+{saved['x']}+{saved['y']}")
+        else:
+            self.root.geometry(f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}")
 
         # Window icon: .ico works on Windows via iconbitmap. On macOS the Desktop
         # .app bundle supplies the Dock icon (hello_world.icns); Tk may ignore .ico.
@@ -70,12 +161,66 @@ class WalkerApp:
         self.phase = 0.0
         self.x = 40.0
         self._after_id: str | None = None
+        self._geometry_checked = False
         self.root.bind("<Configure>", self._on_configure)
         self._tick()
 
     def _on_configure(self, _event: tk.Event | None = None) -> None:
         # Redraw immediately on resize so the figure stays centered vertically.
         self._draw()
+        # First real map/resize: if restored coords are off-screen, re-center defaults.
+        if not self._geometry_checked:
+            try:
+                if int(self.root.winfo_width()) >= MIN_WIDTH and int(self.root.winfo_height()) >= MIN_HEIGHT:
+                    self._geometry_checked = True
+                    self._ensure_on_screen()
+            except tk.TclError:
+                pass
+
+    def _ensure_on_screen(self) -> None:
+        """If the restored top-left is off every screen, fall back to default size centered."""
+        try:
+            self.root.update_idletasks()
+            x = int(self.root.winfo_x())
+            y = int(self.root.winfo_y())
+            w = int(self.root.winfo_width())
+            h = int(self.root.winfo_height())
+            sw = int(self.root.winfo_screenwidth())
+            sh = int(self.root.winfo_screenheight())
+        except tk.TclError:
+            return
+        # Require a minimum overlap with the primary virtual screen bounds.
+        # (Multi-monitor virtual desktop still reports a large screenwidth/height on Windows.)
+        margin = 40
+        on_screen = (x + w > margin) and (y + h > margin) and (x < sw - margin) and (y < sh - margin)
+        if not on_screen:
+            self.root.geometry(f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}")
+            self.root.update_idletasks()
+            try:
+                self.root.geometry(
+                    f"+{(sw - DEFAULT_WIDTH) // 2}+{(sh - DEFAULT_HEIGHT) // 2}"
+                )
+            except tk.TclError:
+                pass
+
+    def persist_geometry(self) -> None:
+        """Write current window position and size for the next launch."""
+        try:
+            self.root.update_idletasks()
+            # Prefer parsing geometry() ("WxH+X+Y", X/Y may be negative) so we
+            # round-trip the same values Tk accepts on the next geometry() call.
+            geo = self.root.geometry()
+            parsed = _parse_geometry(geo)
+            if parsed is not None:
+                x, y, w, h = parsed
+            else:
+                x = int(self.root.winfo_x())
+                y = int(self.root.winfo_y())
+                w = int(self.root.winfo_width())
+                h = int(self.root.winfo_height())
+            save_geometry(x, y, max(MIN_WIDTH, w), max(MIN_HEIGHT, h))
+        except (tk.TclError, ValueError):
+            pass
 
     def _tick(self) -> None:
         self.phase = (self.phase + 0.045) % 1.0
@@ -222,6 +367,7 @@ def main() -> None:
     app = WalkerApp(root)
 
     def on_close() -> None:
+        app.persist_geometry()
         app.shutdown()
         root.destroy()
 

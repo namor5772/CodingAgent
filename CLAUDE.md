@@ -124,6 +124,7 @@ macOS "shortcuts" are minimal `.app` bundles (shell launcher in `Contents/MacOS`
 - Prefer **stdlib** / system libs for app runtime; optional tools (Pillow, PowerShell COM, MSVC, sips/iconutil) only for asset/shortcut/build setup.
 - Keep the UI single-window and minimal unless the task expands scope.
 - Match the Python UI when changing either C++ clone (title, walk cycle math, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
+- Window geometry persistence is **per app**: Python -> `hello_world_geometry.json`, C++ -> `hello_world_cpp_geometry.json` in the same per-user CodingAgent config dir (`%LOCALAPPDATA%` / `~/Library/Application Support` / XDG). Do not share one file across implementations.
 - Use `pythonw` / WINDOWS subsystem / macOS `.app` launchers for end-user launch so no console/Terminal flashes.
 - PowerShell scripts: stick to **ASCII** in string literals (encoding/code-page issues with em dashes etc.). Shell scripts: ASCII preferred in generated plists/launchers.
 - macOS drawing uses AppKit bottom-left origin; flip Y in the draw path so walk-cycle math stays identical to Win32/Tk (top-left).

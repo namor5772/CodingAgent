@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -13,6 +15,15 @@ constexpr int kDefaultWidth = 400;
 constexpr int kDefaultHeight = 200;
 constexpr int kMinWidth = 300;
 constexpr int kMinHeight = 150;
+
+// Content size + outer frame origin (same JSON keys as the Python / Win32 apps).
+struct WindowGeometry {
+    int x = 0;
+    int y = 0;
+    int w = kDefaultWidth;
+    int h = kDefaultHeight;
+    bool valid = false;
+};
 
 // Match hello_world.py: bg #1a1a2e, fg #eaeaea, hat #c9a227, ground #2a2a44
 constexpr CGFloat kBgR = 0x1a / 255.0, kBgG = 0x1a / 255.0, kBgB = 0x2e / 255.0;
@@ -71,6 +82,115 @@ std::string ExeDirectory() {
         }
         return std::string([dir fileSystemRepresentation]);
     }
+}
+
+// ~/Library/Application Support/CodingAgent/hello_world_cpp_geometry.json
+// (C++ only; Python uses hello_world_geometry.json in the same folder.)
+std::string GeometryConfigPath() {
+    @autoreleasepool {
+        NSArray<NSString*>* urls = NSSearchPathForDirectoriesInDomains(
+            NSApplicationSupportDirectory, NSUserDomainMask, YES);
+        NSString* base = urls.firstObject;
+        if (!base) {
+            base = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
+        }
+        NSString* dir = [base stringByAppendingPathComponent:@"CodingAgent"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+        NSString* path = [dir stringByAppendingPathComponent:@"hello_world_cpp_geometry.json"];
+        return std::string([path fileSystemRepresentation]);
+    }
+}
+
+WindowGeometry LoadGeometry() {
+    WindowGeometry g{};
+    const std::string path = GeometryConfigPath();
+    FILE* fp = std::fopen(path.c_str(), "rb");
+    if (!fp) {
+        return g;
+    }
+    char buf[512] = {};
+    const size_t n = std::fread(buf, 1, sizeof(buf) - 1, fp);
+    std::fclose(fp);
+    if (n == 0) {
+        return g;
+    }
+    buf[n] = '\0';
+
+    int x = 0, y = 0, w = 0, h = 0;
+    const char* px = std::strstr(buf, "\"x\"");
+    const char* py = std::strstr(buf, "\"y\"");
+    const char* pw = std::strstr(buf, "\"w\"");
+    const char* ph = std::strstr(buf, "\"h\"");
+    if (!px || !py || !pw || !ph) {
+        return g;
+    }
+    if (std::sscanf(px, "\"x\"%*[^0-9-]%d", &x) != 1) {
+        return g;
+    }
+    if (std::sscanf(py, "\"y\"%*[^0-9-]%d", &y) != 1) {
+        return g;
+    }
+    if (std::sscanf(pw, "\"w\"%*[^0-9-]%d", &w) != 1) {
+        return g;
+    }
+    if (std::sscanf(ph, "\"h\"%*[^0-9-]%d", &h) != 1) {
+        return g;
+    }
+    if (w < kMinWidth || h < kMinHeight || w > 20000 || h > 20000) {
+        return g;
+    }
+    if (x < -100000 || x > 100000 || y < -100000 || y > 100000) {
+        return g;
+    }
+    g.x = x;
+    g.y = y;
+    g.w = w;
+    g.h = h;
+    g.valid = true;
+    return g;
+}
+
+void SaveGeometry(const WindowGeometry& g) {
+    if (g.w < kMinWidth || g.h < kMinHeight) {
+        return;
+    }
+    const std::string path = GeometryConfigPath();
+    FILE* fp = std::fopen(path.c_str(), "wb");
+    if (!fp) {
+        return;
+    }
+    std::fprintf(fp,
+                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d\n}\n",
+                 g.x, g.y, g.w, g.h);
+    std::fclose(fp);
+}
+
+void SaveGeometryFromWindow(NSWindow* window) {
+    if (!window) {
+        return;
+    }
+    const NSRect frame = window.frame;
+    const NSRect content = [window contentRectForFrameRect:frame];
+    WindowGeometry g{};
+    // Store top-left style origin for cross-app JSON consistency: convert from
+    // AppKit bottom-left frame origin to a top-left-ish x/y matching Tk/Win32.
+    NSScreen* screen = window.screen ?: [NSScreen mainScreen];
+    const CGFloat screenH = screen ? screen.frame.size.height : 0;
+    g.x = static_cast<int>(std::lround(frame.origin.x));
+    g.y = static_cast<int>(std::lround(screenH - frame.origin.y - frame.size.height));
+    g.w = static_cast<int>(std::lround(content.size.width));
+    g.h = static_cast<int>(std::lround(content.size.height));
+    if (g.w < kMinWidth) {
+        g.w = kMinWidth;
+    }
+    if (g.h < kMinHeight) {
+        g.h = kMinHeight;
+    }
+    g.valid = true;
+    SaveGeometry(g);
 }
 
 void StrokeLine(CGContextRef ctx, CGFloat x1, CGFloat y1, CGFloat x2, CGFloat y2) {
@@ -270,8 +390,12 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     const NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
 
-    // contentRect is the client area — match Tk geometry 400x200.
-    const NSRect contentRect = NSMakeRect(0, 0, kDefaultWidth, kDefaultHeight);
+    const WindowGeometry saved = LoadGeometry();
+    const CGFloat contentW = saved.valid ? static_cast<CGFloat>(saved.w) : kDefaultWidth;
+    const CGFloat contentH = saved.valid ? static_cast<CGFloat>(saved.h) : kDefaultHeight;
+
+    // contentRect is the client area — match Tk geometry 400x200 (or restored size).
+    const NSRect contentRect = NSMakeRect(0, 0, contentW, contentH);
     self.window = [[NSWindow alloc] initWithContentRect:contentRect
                                               styleMask:style
                                                 backing:NSBackingStoreBuffered
@@ -280,8 +404,34 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     self.window.backgroundColor =
         [NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0];
     [self.window setContentMinSize:NSMakeSize(kMinWidth, kMinHeight)];
-    [self.window center];
     self.window.releasedWhenClosed = NO;
+
+    if (saved.valid) {
+        // JSON stores top-left style y (Tk/Win32); convert to AppKit bottom-left frame.
+        NSScreen* screen = [NSScreen mainScreen];
+        const CGFloat screenH = screen ? screen.frame.size.height : 0;
+        const NSRect curFrame = self.window.frame;
+        const CGFloat frameH = curFrame.size.height;
+        const CGFloat frameW = curFrame.size.width;
+        const CGFloat frameX = static_cast<CGFloat>(saved.x);
+        const CGFloat frameY = screenH - static_cast<CGFloat>(saved.y) - frameH;
+        NSRect placed = NSMakeRect(frameX, frameY, frameW, frameH);
+        // If the restored top-left is off every screen, center instead.
+        BOOL onScreen = NO;
+        for (NSScreen* s in [NSScreen screens]) {
+            if (NSPointInRect(NSMakePoint(frameX + 20, frameY + frameH - 20), s.frame)) {
+                onScreen = YES;
+                break;
+            }
+        }
+        if (onScreen) {
+            [self.window setFrame:placed display:NO];
+        } else {
+            [self.window center];
+        }
+    } else {
+        [self.window center];
+    }
 
     self.walker = [[WalkerView alloc] initWithFrame:contentRect];
     self.walker.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -333,6 +483,7 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
 
 - (void)applicationWillTerminate:(NSNotification*)notification {
     (void)notification;
+    SaveGeometryFromWindow(self.window);
     [self.walker stopAnimation];
 }
 
