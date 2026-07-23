@@ -1,11 +1,11 @@
 # CodingAgent
 
-Minimal Windows desktop demo: a window that displays **HELLO WORLD**, plus an optional Desktop shortcut with a custom icon.
+Minimal Windows desktop demo: a window titled **Hello World** with a short looping animation of a stick figure in a top hat walking across the window, plus optional Desktop shortcuts with a custom icon.
 
 Two equivalent implementations ship side by side:
 
-- **Python** — `hello_world.py` (Tkinter)
-- **C++** — `hello_world.cpp` (native Win32)
+- **Python** — `hello_world.py` (Tkinter Canvas)
+- **C++** — `hello_world.cpp` (native Win32 GDI)
 
 ## Requirements
 
@@ -41,8 +41,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build_cpp.ps1
 
 | Path | Role |
 |------|------|
-| `hello_world.py` | Python/Tk app — window titled "Hello World" showing **HELLO WORLD** |
-| `hello_world.cpp` | Native Win32 clone of the same UI |
+| `hello_world.py` | Python/Tk app — stick figure with hat walking on a Canvas |
+| `hello_world.cpp` | Native Win32 clone of the same animation |
 | `build_cpp.ps1` | Builds `hello_world_cpp.exe` with MSVC x64 |
 | `hello_world.ico` | Multi-size app icon (window title bar / taskbar and shortcut) |
 | `create_icon.py` | Regenerates `hello_world.ico` (blue rounded tile with white **H**) |
@@ -79,9 +79,21 @@ pip install pillow   # once, if needed
 python create_icon.py
 ```
 
+## UI parity (Python and C++)
+
+Both apps aim to match:
+
+- Window title **Hello World**, dark canvas `#1a1a2e`, figure `#eaeaea`, hat `#c9a227`, ground `#2a2a44`
+- Default **client** size 400x200 and minimum **client** size 300x150 (C++ converts client to outer size with `AdjustWindowRectEx` so chrome does not shrink the canvas vs Tk)
+- ~50 ms frame timer, shared walk-cycle math and scaling
+- Bundled `hello_world.ico` for the window and Desktop shortcuts
+
+C++ draws with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, hat, arms, legs).
+
 ## Notes
 
 - Python runtime depends only on the standard library (`tkinter`).
 - C++ runtime depends only on system Win32 libraries (`user32`, `gdi32`).
-- Prefer `pythonw` / the `.exe` subsystem for end-user launch so no console flashes.
+- Prefer `pythonw` / the Windows subsystem `.exe` for end-user launch so no console flashes.
+- Do not commit MSVC outputs (`hello_world_cpp.exe`, `*.obj`, `*.pdb`) or `__pycache__/`.
 - Packaging, installers, and non-Windows ports are out of scope for now.

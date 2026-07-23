@@ -2,12 +2,12 @@
 
 ## What this is
 
-Minimal Windows desktop demo: a window that shows **HELLO WORLD**, plus a Desktop shortcut with a custom icon.
+Minimal Windows desktop demo: a window titled **Hello World** that plays a short looping animation of a stick figure with a top hat walking across a dark canvas, plus Desktop shortcuts with a custom icon.
 
 Implementations:
 
-- Python/Tkinter: `hello_world.py`
-- Native Win32 C++: `hello_world.cpp` -> `hello_world_cpp.exe` via `build_cpp.ps1`
+- Python/Tkinter: `hello_world.py` (Canvas + `after` timer)
+- Native Win32 C++: `hello_world.cpp` -> `hello_world_cpp.exe` via `build_cpp.ps1` (GDI + `SetTimer`, double-buffered)
 
 ## Environment
 
@@ -21,8 +21,8 @@ Implementations:
 
 | Path | Role |
 |------|------|
-| `hello_world.py` | Python app — open a Tk window and display `HELLO WORLD`. |
-| `hello_world.cpp` | Win32 C++ clone of the same UI (title, colors, font, minsize, icon). |
+| `hello_world.py` | Python app — stick figure with hat walking on a Tk Canvas. |
+| `hello_world.cpp` | Win32 C++ clone of the same animation (title, colors, minsize, icon). |
 | `build_cpp.ps1` | MSVC build script producing `hello_world_cpp.exe` (WINDOWS subsystem). |
 | `hello_world_cpp.exe` | Build output (gitignored). Run from repo root so `hello_world.ico` resolves. |
 | `hello_world.ico` | Multi-size app icon (window + shortcut). Generated; commit if you want a clone to work without regenerating. |
@@ -69,7 +69,7 @@ Python shortcut target uses `pythonw.exe` next to whatever `python` is on PATH. 
 ## Quick verification
 
 - Parse/import: `python -c "import ast, pathlib; ast.parse(pathlib.Path('hello_world.py').read_text()); import hello_world"`
-- GUI smoke (build window, assert label, destroy): keep it headless-friendly with `root.update()` then `root.destroy()` — do not leave `mainloop()` running in automated checks.
+- GUI smoke (build window, advance a few animation ticks, assert canvas items, destroy): keep it headless-friendly with `root.update()` then `root.destroy()` — do not leave `mainloop()` running in automated checks.
 - C++: build with `build_cpp.ps1`, launch `hello_world_cpp.exe`, assert a visible window titled `Hello World` (~400x200), then `WM_CLOSE` and expect a clean exit.
 - Python shortcut: COM `WScript.Shell`.CreateShortcut on `%Desktop%\Hello World.lnk` — check `TargetPath` (pythonw), `Arguments` (hello_world.py), `IconLocation`.
 - C++ shortcut: same for `%Desktop%\Hello World (C++).lnk` — `TargetPath` = `hello_world_cpp.exe`, empty `Arguments`, `WorkingDirectory` = repo root, `IconLocation` from `hello_world.ico`.
@@ -78,7 +78,7 @@ Python shortcut target uses `pythonw.exe` next to whatever `python` is on PATH. 
 
 - Prefer **stdlib** / system libs for app runtime; optional tools (Pillow, PowerShell COM, MSVC) only for asset/shortcut/build setup.
 - Keep the UI single-window and minimal unless the task expands scope.
-- Match the Python UI when changing the C++ clone (title, text, colors `#1a1a2e` / `#eaeaea`, Segoe UI 32 bold, 400x200 default, 300x150 min, bundled `.ico`).
+- Match the Python UI when changing the C++ clone (title, walk cycle math, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled `.ico`, ~50 ms frame timer).
 - Use `pythonw` / WINDOWS subsystem for end-user launch so no console flashes.
 - PowerShell scripts: stick to **ASCII** in string literals (encoding/code-page issues with em dashes etc.).
 - Do not commit `__pycache__/` or MSVC build outputs (`*.obj`, `*.pdb`, `hello_world_cpp.exe`).
