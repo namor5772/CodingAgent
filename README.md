@@ -25,10 +25,11 @@ Implementations ship side by side:
 
 ## Quick start (Python)
 
+From the repo root:
+
 Windows:
 
 ```powershell
-cd C:\Users\roman\ClonedProjects\CodingAgent
 python hello_world.py
 ```
 
@@ -41,7 +42,6 @@ pythonw hello_world.py
 macOS (Homebrew Python with Tk 8.6+ — not Apple `/usr/bin/python3`):
 
 ```bash
-cd /Users/roman/projects/CodingAgent
 /opt/homebrew/bin/python3 hello_world.py
 # or, if that python3 is first on your PATH:
 python3 hello_world.py
@@ -52,22 +52,20 @@ python3 hello_world.py
 Windows:
 
 ```powershell
-cd C:\Users\roman\ClonedProjects\CodingAgent
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_cpp.ps1
 .\hello_world_cpp.exe
 ```
 
-`build_cpp.ps1` locates MSVC via `vswhere`, runs `vcvars64.bat`, and produces `hello_world_cpp.exe` (Windows subsystem, no console). Place `hello_world.ico` next to the exe (repo root) so the window picks up the same icon as the Python app.
+`build_cpp.ps1` locates MSVC via `vswhere`, runs `vcvars64.bat`, and produces `hello_world_cpp.exe` (Windows subsystem, no console). Keep `hello_world.ico` in the repo root so the window picks up the same icon as the Python app.
 
 macOS:
 
 ```bash
-cd /Users/roman/projects/CodingAgent
 ./build_cpp_macos.sh
 ./hello_world_cpp
 ```
 
-`build_cpp_macos.sh` compiles `hello_world_macos.mm` with `clang++` and links AppKit/Cocoa. Place `hello_world.icns` in the repo root (shortcut scripts can generate it from `hello_world.ico`) so the app can set its icon when launched outside a bundle.
+`build_cpp_macos.sh` compiles `hello_world_macos.mm` with `clang++` and links AppKit/Cocoa. Keep `hello_world.icns` in the repo root (shortcut scripts can generate it from `hello_world.ico`) so the app can set its icon when launched outside a bundle.
 
 ## Project layout
 
@@ -91,15 +89,21 @@ cd /Users/roman/projects/CodingAgent
 
 ### Windows
 
-Python:
+Full setup (build C++ then create both shortcuts):
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_cpp.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\create_shortcut.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\create_shortcut_cpp.ps1
 ```
 
-C++ (build the exe first):
+Or individually:
 
 ```powershell
+# Python only
+powershell -NoProfile -ExecutionPolicy Bypass -File .\create_shortcut.ps1
+
+# C++ only (build the exe first)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_cpp.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\create_shortcut_cpp.ps1
 ```
@@ -113,15 +117,21 @@ Both use `hello_world.ico` when present. Working directory is the repo root (so 
 
 ### macOS
 
-Python:
+Full setup (build C++ then create both Desktop apps):
 
 ```bash
+./build_cpp_macos.sh
 ./create_shortcut_macos.sh
+./create_shortcut_cpp_macos.sh
 ```
 
-C++ (build the binary first):
+Or individually:
 
 ```bash
+# Python only
+./create_shortcut_macos.sh
+
+# C++ only (build the binary first)
 ./build_cpp_macos.sh
 ./create_shortcut_cpp_macos.sh
 ```
