@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import tkinter as tk
 from pathlib import Path
 
@@ -54,6 +55,8 @@ class WalkerApp:
         self.root.minsize(300, 150)
         self.root.configure(bg=BG)
 
+        # Window icon: .ico works on Windows via iconbitmap. On macOS the Desktop
+        # .app bundle supplies the Dock icon (hello_world.icns); Tk may ignore .ico.
         icon_path = Path(__file__).resolve().parent / "hello_world.ico"
         if icon_path.is_file():
             try:
@@ -174,7 +177,47 @@ class WalkerApp:
             self._after_id = None
 
 
+def _tk_patchlevel() -> str:
+    try:
+        return str(tk.Tcl().eval("info patchlevel"))
+    except tk.TclError:
+        return "unknown"
+
+
+def _tk_is_usable() -> bool:
+    """Apple's system Tk 8.5 on modern macOS often paints an empty Canvas."""
+    try:
+        parts = [int(p) for p in _tk_patchlevel().split(".")[:2]]
+        while len(parts) < 2:
+            parts.append(0)
+        return tuple(parts[:2]) >= (8, 6)
+    except ValueError:
+        return True  # don't block unknown formats
+
+
 def main() -> None:
+    # Fail fast with a clear message instead of a blank dark window (macOS system Tk 8.5).
+    if sys.platform == "darwin" and not _tk_is_usable():
+        msg = (
+            f"This Python's Tk {_tk_patchlevel()} cannot reliably draw the walker "
+            f"on macOS (need Tk 8.6+).\n"
+            f"Python: {sys.executable}\n"
+            f"Install/use Homebrew Python instead, then recreate the Desktop app:\n"
+            f"  brew install python python-tk\n"
+            f"  /opt/homebrew/bin/python3 hello_world.py\n"
+            f"  ./create_shortcut_macos.sh\n"
+        )
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            from tkinter import messagebox
+
+            messagebox.showerror("Hello World — Tk too old", msg)
+            root.destroy()
+        except Exception:
+            print(msg, file=sys.stderr)
+        raise SystemExit(1)
+
     root = tk.Tk()
     app = WalkerApp(root)
 

@@ -31,6 +31,11 @@ def make_icon(path: Path) -> None:
             "C:/Windows/Fonts/segoeuib.ttf",
             "C:/Windows/Fonts/arialbd.ttf",
             "C:/Windows/Fonts/arial.ttf",
+            # macOS
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial Bold.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
         ):
             try:
                 font = ImageFont.truetype(name, font_size)

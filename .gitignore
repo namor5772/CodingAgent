@@ -17,3 +17,5 @@ Thumbs.db
 *.exp
 *.lib
 hello_world_cpp.exe
+hello_world_cpp
+*.dSYM/
