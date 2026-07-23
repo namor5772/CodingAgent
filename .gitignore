@@ -8,3 +8,12 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+
+# MSVC / C++ build outputs
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+hello_world_cpp.exe
