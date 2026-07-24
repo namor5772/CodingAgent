@@ -58,6 +58,8 @@ struct Pose {
     double leg_r;
     double knee_l;
     double knee_r;
+    double foot_l;
+    double foot_r;
     double arm_l;
     double arm_r;
     double bob;
@@ -79,6 +81,16 @@ Pose WalkPose(double phase) {
     const double flex_r = std::cos(t + kPi + 0.6);
     p.knee_l = 1.0 * (flex_l > 0.0 ? flex_l : 0.0);
     p.knee_r = 1.0 * (flex_r > 0.0 ? flex_r : 0.0);
+    // Feet (pi/2 = flat on the ground, toes forward): dorsiflex (toes up)
+    // into heel strike, rock flat by mid-stance, then plantarflex (heel up,
+    // toes down) through toe-off into early swing — knee flexion gated to
+    // the leg being behind the body is exactly the heel-lift window.
+    const double sin_l = std::sin(t);
+    const double sin_r = std::sin(t + kPi);
+    p.foot_l = kPi / 2.0 + 0.4 * (sin_l > 0.0 ? sin_l : 0.0) -
+               0.8 * p.knee_l * (sin_l < 0.0 ? -sin_l : 0.0);
+    p.foot_r = kPi / 2.0 + 0.4 * (sin_r > 0.0 ? sin_r : 0.0) -
+               0.8 * p.knee_r * (sin_r < 0.0 ? -sin_r : 0.0);
     p.arm_l = 0.40 * std::sin(t + kPi);  // arms counter same-side legs
     p.arm_r = 0.40 * std::sin(t);
     // One bounce per step: 4.2 = 42 * (1 - cos(0.45)) keeps the straight
@@ -375,6 +387,7 @@ void DrawWalker(HWND hwnd, HDC hdc) {
     const double torso = 34.0 * scale;
     const double upper_leg = 22.0 * scale;
     const double lower_leg = 20.0 * scale;
+    const double foot_len = 8.0 * scale;
     const double upper_arm = 16.0 * scale;
     const double lower_arm = 14.0 * scale;
     const int stroke = (std::max)(2, static_cast<int>(std::lround(3.0 * scale)));
@@ -491,17 +504,22 @@ void DrawWalker(HWND hwnd, HDC hdc) {
     }
 
     // Legs: knee flexion folds the shin backward (heel toward the body), so
-    // the knee vertex points in the walking direction.
+    // the knee vertex points in the walking direction. The foot line is
+    // ground-anchored (angle is absolute, not shin-relative).
     const double legAngles[2] = {pose.leg_l, pose.leg_r};
     const double knees[2] = {pose.knee_l, pose.knee_r};
+    const double feet[2] = {pose.foot_l, pose.foot_r};
     for (int i = 0; i < 2; ++i) {
-        double kx = 0, ky = 0, fx = 0, fy = 0;
+        double kx = 0, ky = 0, fx = 0, fy = 0, tx = 0, ty = 0;
         LimbEnd(cx, hip_y, legAngles[i], upper_leg, &kx, &ky);
         LimbEnd(kx, ky, legAngles[i] - knees[i], lower_leg, &fx, &fy);
+        LimbEnd(fx, fy, feet[i], foot_len, &tx, &ty);
         LineTo2(hdc, static_cast<int>(std::lround(cx)), static_cast<int>(std::lround(hip_y)),
                 static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)));
         LineTo2(hdc, static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)),
                 static_cast<int>(std::lround(fx)), static_cast<int>(std::lround(fy)));
+        LineTo2(hdc, static_cast<int>(std::lround(fx)), static_cast<int>(std::lround(fy)),
+                static_cast<int>(std::lround(tx)), static_cast<int>(std::lround(ty)));
     }
 
     SelectObject(hdc, oldPen);

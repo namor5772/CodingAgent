@@ -175,7 +175,7 @@ All apps aim to match:
 
 - Window title **Hello World**, dark canvas `#1a1a2e`, figure `#eaeaea`, hat `#c9a227`, ground `#2a2a44`
 - Default **client** size 400x200 and minimum **client** size 300x150 (Win32 converts client to outer size with `AdjustWindowRectEx`; macOS uses `contentRect` / `setContentMinSize` so chrome does not shrink the canvas vs Tk)
-- ~50 ms frame timer, shared walk-cycle math and scaling: hips swing +/-0.45 rad, knees flex one way only (near-straight stance leg, knee bent toward the walking direction during the forward swing), one body-bob per step sized so a planted straight leg's foot touches the fixed ground line
+- ~50 ms frame timer, shared walk-cycle math and scaling: hips swing +/-0.45 rad, knees flex one way only (near-straight stance leg, knee bent toward the walking direction during the forward swing), one body-bob per step sized so a planted straight leg's foot touches the fixed ground line, and line feet that lie flat on the ground through stance, point toes-up into heel strike, and lift heel-up/toes-down through push-off
 - Simple profile face (eye dot, nose wedge, mouth) facing the walking direction; the hat crown is filled with the background color so the head outline stays hidden inside the hat
 - Stick-figure dog trotting ~65 px (scaled) behind the walker: diagonal leg pairs (trot) with the same one-way lower-leg folds, wagging tail, pointed ear, muzzle and eye dot; the walk wraps around only after the dog has also cleared the right edge
 - Bundled icon for the window and Desktop shortcuts (`.ico` on Windows, `.icns` on macOS)

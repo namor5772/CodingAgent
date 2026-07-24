@@ -119,6 +119,21 @@ def walk_pose(phase: float) -> dict[str, float]:
     # lead starts the heel lift just before toe-off and peaks mid-recovery.
     knee_l = 1.0 * max(0.0, math.cos(t + 0.6))
     knee_r = 1.0 * max(0.0, math.cos(t + math.pi + 0.6))
+    # Feet (pi/2 = flat on the ground, toes forward): dorsiflex (toes up)
+    # into heel strike, rock flat by mid-stance, then plantarflex (heel up,
+    # toes down) through toe-off into early swing — the second term is knee
+    # flexion gated to the leg being behind the body, which is exactly the
+    # heel-lift window.
+    foot_l = (
+        math.pi / 2
+        + 0.4 * max(0.0, math.sin(t))
+        - 0.8 * knee_l * max(0.0, -math.sin(t))
+    )
+    foot_r = (
+        math.pi / 2
+        + 0.4 * max(0.0, math.sin(t + math.pi))
+        - 0.8 * knee_r * max(0.0, -math.sin(t + math.pi))
+    )
     arm_l = 0.40 * math.sin(t + math.pi)  # arms counter same-side legs
     arm_r = 0.40 * math.sin(t)
     # One bounce per step: tallest as the stance leg passes vertical, lowest
@@ -130,6 +145,8 @@ def walk_pose(phase: float) -> dict[str, float]:
         "leg_r": leg_r,
         "knee_l": knee_l,
         "knee_r": knee_r,
+        "foot_l": foot_l,
+        "foot_r": foot_r,
         "arm_l": arm_l,
         "arm_r": arm_r,
         "bob": bob,
@@ -295,6 +312,7 @@ class WalkerApp:
         torso = 34 * scale
         upper_leg = 22 * scale
         lower_leg = 20 * scale
+        foot_len = 8 * scale
         upper_arm = 16 * scale
         lower_arm = 14 * scale
         stroke = max(2, int(round(3 * scale)))
@@ -394,12 +412,18 @@ class WalkerApp:
             c.create_line(ex, ey, hx, hy, fill=FG, width=stroke, capstyle=tk.ROUND)
 
         # Legs from hips; knee flexion folds the shin backward (heel toward
-        # the body), so the knee vertex points in the walking direction.
-        for hip_ang, knee in ((pose["leg_l"], pose["knee_l"]), (pose["leg_r"], pose["knee_r"])):
+        # the body), so the knee vertex points in the walking direction. The
+        # foot line is ground-anchored (angle is absolute, not shin-relative).
+        for hip_ang, knee, foot_ang in (
+            (pose["leg_l"], pose["knee_l"], pose["foot_l"]),
+            (pose["leg_r"], pose["knee_r"], pose["foot_r"]),
+        ):
             kx, ky = limb_end(cx, hip_y, hip_ang, upper_leg)
             fx, fy = limb_end(kx, ky, hip_ang - knee, lower_leg)
+            tx_, ty_ = limb_end(fx, fy, foot_ang, foot_len)
             c.create_line(cx, hip_y, kx, ky, fill=FG, width=stroke, capstyle=tk.ROUND)
             c.create_line(kx, ky, fx, fy, fill=FG, width=stroke, capstyle=tk.ROUND)
+            c.create_line(fx, fy, tx_, ty_, fill=FG, width=stroke, capstyle=tk.ROUND)
 
         # Dog trotting behind the walker, on the same ground line; drawn one
         # stroke thinner so it reads as the smaller figure.
