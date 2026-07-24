@@ -1,12 +1,14 @@
 # CodingAgent
 
-Minimal desktop demo: a window titled **Hello World** with a short looping animation of a stick figure in a top hat walking across the window, plus optional Desktop shortcuts with a custom icon.
+Minimal desktop demo: a window titled **Hello World** with a short looping animation of a stick figure in a top hat walking across the window, optional Desktop shortcuts with a custom icon, and **per-app window geometry persistence** (position and client size restored on the next launch).
 
 Implementations ship side by side:
 
 - **Python** — `hello_world.py` (Tkinter Canvas) on Windows and macOS
 - **C++ (Windows)** — `hello_world.cpp` (native Win32 GDI)
 - **C++ (macOS)** — `hello_world_macos.mm` (native Cocoa / AppKit)
+
+Python and C++ keep **separate** geometry files so resizing one does not move the other.
 
 ## Requirements
 
@@ -154,8 +156,9 @@ The same git tree works on both OSes. After `git pull`:
 | Build | `build_cpp.ps1` → `hello_world_cpp.exe` | `build_cpp_macos.sh` → `hello_world_cpp` |
 | Desktop shortcut | `create_shortcut*.ps1` → `.lnk` | `create_shortcut*_macos.sh` → `.app` |
 | Icon | `hello_world.ico` | `hello_world.icns` (optional; derived from `.ico`) |
+| Geometry config dir | `%LOCALAPPDATA%\CodingAgent\` | `~/Library/Application Support/CodingAgent/` |
 
-Platform-specific scripts are no-ops on the other OS — use the matching ones for the machine you are on. Build outputs are gitignored; rebuild after pull.
+Platform-specific scripts are no-ops on the other OS — use the matching ones for the machine you are on. Build outputs are gitignored; rebuild after pull. Geometry JSON lives outside the repo (per-user config) and is never committed.
 
 ## Regenerate the icon
 
@@ -182,12 +185,12 @@ macOS C++ draws with Core Graphics in an `NSView` (`drawRect:`), round line caps
 
 ## Window geometry persistence
 
-Each implementation remembers its own window **position and client size** across launches (JSON under a per-user config directory). Python and C++ **do not share** the same file, so moving or resizing one app does not affect the other.
+Each implementation remembers its own window **position and client size** across launches. Values are written as small JSON files under a per-user config directory (not in the git tree). Python and C++ **do not share** the same file, so moving or resizing one app does not affect the other.
 
 | App | Config file |
 |-----|-------------|
 | Python (`hello_world.py`) | `hello_world_geometry.json` |
-| C++ (Win32 / macOS) | `hello_world_cpp_geometry.json` |
+| C++ (Win32 and macOS) | `hello_world_cpp_geometry.json` |
 
 | OS | Directory |
 |----|-----------|
@@ -195,14 +198,49 @@ Each implementation remembers its own window **position and client size** across
 | macOS | `~/Library/Application Support/CodingAgent/` |
 | Other (Python) | `$XDG_CONFIG_HOME/CodingAgent/` or `~/.config/CodingAgent/` |
 
-Invalid, too-small, or off-screen restored values fall back to the default 400x200 client size (centered when possible).
+### JSON shape
+
+Both apps read and write the same keys (`w` / `h` are **client** width and height; `x` / `y` are the outer frame top-left in a top-left origin, including on macOS where AppKit is converted on save/load):
+
+```json
+{
+  "x": 120,
+  "y": 80,
+  "w": 400,
+  "h": 200
+}
+```
+
+### When it saves and restores
+
+- **Restore:** on startup, if the file exists and parses cleanly.
+- **Save:** when the window is closing (Python `WM_DELETE_WINDOW` / destroy path; Win32 `WM_CLOSE`; macOS window will-close). Minimized windows are skipped on Win32 so iconified coordinates are not stored.
+- **Fallback:** missing file, corrupt JSON, size below the 300x150 client minimum, absurd coordinates, or a restored top-left that appears off-screen → default **400x200** client size (re-centered when possible).
+
+### Reset to defaults
+
+Delete the app's JSON file (or the whole `CodingAgent` config folder), then relaunch:
+
+```powershell
+# Windows (PowerShell)
+Remove-Item "$env:LOCALAPPDATA\CodingAgent\hello_world_geometry.json" -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\CodingAgent\hello_world_cpp_geometry.json" -ErrorAction SilentlyContinue
+```
+
+```bash
+# macOS / Linux
+rm -f "$HOME/Library/Application Support/CodingAgent/hello_world_geometry.json"
+rm -f "$HOME/Library/Application Support/CodingAgent/hello_world_cpp_geometry.json"
+# Python on Linux/XDG:
+# rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/CodingAgent/hello_world_geometry.json"
+```
 
 ## Notes
 
-- Python runtime depends only on the standard library (`tkinter`).
-- Windows C++ runtime depends only on system Win32 libraries (`user32`, `gdi32`).
-- macOS C++ runtime depends only on system Cocoa/AppKit.
+- Python runtime depends only on the standard library (`tkinter`, `json`).
+- Windows C++ runtime depends only on system Win32 libraries (`user32`, `gdi32`); geometry I/O uses simple C file + field scan (no extra JSON library).
+- macOS C++ runtime depends only on system Cocoa/AppKit; same minimal JSON read/write as Win32.
 - Prefer `pythonw` / the Windows subsystem `.exe` / macOS `.app` launchers for end-user launch so no console or Terminal flashes.
-- On macOS, `hello_world.py` exits with an error dialog if Tk is older than 8.6 (blank-canvas bug with Apple system Tk 8.5).
-- Do not commit build outputs (`hello_world_cpp.exe`, `hello_world_cpp`, `*.obj`, `*.o`, `*.pdb`, `*.dSYM/`) or `__pycache__/`.
+- On macOS, `hello_world.py` exits with an error dialog if Tk is older than 8.6 (blank-canvas bug with Apple system Tk 8.5). Prefer Homebrew `python3` (`brew install python python-tk`).
+- Do not commit build outputs (`hello_world_cpp.exe`, `hello_world_cpp`, `*.obj`, `*.o`, `*.pdb`, `*.dSYM/`) or `__pycache__/`. Geometry JSON is stored per-user outside the repo.
 - Packaging and installers remain out of scope for now.
