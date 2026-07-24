@@ -2,7 +2,7 @@
 
 ## What this is
 
-Minimal desktop demo: a window titled **Hello World** that plays a short looping animation of a stick figure with a top hat walking across a dark canvas, plus Desktop shortcuts with a custom icon.
+Minimal desktop demo: a window titled **Hello World** that plays a short looping animation of a stick figure with a top hat and a simple profile face (eye, nose, mouth) walking naturally across a dark canvas, followed by a stick-figure dog trotting behind him, plus Desktop shortcuts with a custom icon.
 
 Implementations:
 
@@ -23,7 +23,7 @@ Implementations:
 
 | Path | Role |
 |------|------|
-| `hello_world.py` | Python app — stick figure with hat walking on a Tk Canvas. |
+| `hello_world.py` | Python app — stick figure with hat + trotting dog on a Tk Canvas. |
 | `hello_world.cpp` | Win32 C++ clone of the same animation (title, colors, minsize, icon). |
 | `hello_world_macos.mm` | macOS Cocoa/AppKit C++ clone of the same animation. |
 | `build_cpp.ps1` | MSVC build script producing `hello_world_cpp.exe` (WINDOWS subsystem). |
@@ -123,7 +123,9 @@ macOS "shortcuts" are minimal `.app` bundles (shell launcher in `Contents/MacOS`
 
 - Prefer **stdlib** / system libs for app runtime; optional tools (Pillow, PowerShell COM, MSVC, sips/iconutil) only for asset/shortcut/build setup.
 - Keep the UI single-window and minimal unless the task expands scope.
-- Match the Python UI when changing either C++ clone (title, walk cycle math, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
+- Match the Python UI when changing either C++ clone (title, walk cycle math, profile face, hat crown filled with the background color so the head is hidden inside it, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
+- Walk-cycle invariants (all three apps): hips swing `0.45*sin(t)` with legs 180 deg apart; knee flexion is one-signed (`max(0, cos(t + 0.6))`) and the shin is drawn at `hip_angle - knee` so knees only fold backward (knee vertex points in the walking direction); bob is `4.2*|sin(t)|` (one bounce per step) and the ground line is anchored to the un-bobbed pose at straight-leg reach so planted feet touch it.
+- Dog invariants (all three apps): trots `65*scale` behind the man on the same ground line, drawn one stroke thinner; diagonal leg pairs `0.60*sin` at the walker's cadence with phase offset `+1.9`, one-signed folds `0.9*max(0, cos(t + 0.6))` drawn as `angle - fold`, spine bob `3.3*|sin(t)|` (= `19*(1 - cos 0.6)`, paws stay planted), tail wag `0.25*sin(2t)` about base angle `pi + 0.55`; the walker's x wraps at `w + 40 + 90*scale` (dog fully off-screen) and respawns at `-40`.
 - Window geometry persistence is **per app**: Python -> `hello_world_geometry.json`, C++ -> `hello_world_cpp_geometry.json` in the same per-user CodingAgent config dir (`%LOCALAPPDATA%` / `~/Library/Application Support` / XDG). Do not share one file across implementations.
 - Use `pythonw` / WINDOWS subsystem / macOS `.app` launchers for end-user launch so no console/Terminal flashes.
 - PowerShell scripts: stick to **ASCII** in string literals (encoding/code-page issues with em dashes etc.). Shell scripts: ASCII preferred in generated plists/launchers.

@@ -64,17 +64,60 @@ struct Pose {
 };
 
 Pose WalkPose(double phase) {
-    const double swing = std::sin(phase * kTau);
-    const double other = std::sin(phase * kTau + 3.14159265358979323846);
+    // Mirror of hello_world.py walk_pose: heel strike with a straight knee,
+    // near-straight stance, then heel lift + knee flexion through the forward
+    // swing. Knee flexion is one-signed (shin folds backward only) and is
+    // drawn as hip_angle - knee.
+    const double kPi = 3.14159265358979323846;
+    const double t = phase * kTau;
     Pose p{};
-    p.leg_l = 0.48 * swing;
-    p.leg_r = 0.48 * other;
-    p.knee_l = 0.55 * (swing < 0.0 ? -swing : 0.0);
-    p.knee_r = 0.55 * (other < 0.0 ? -other : 0.0);
-    p.arm_l = 0.40 * other;
-    p.arm_r = 0.40 * swing;
-    p.bob = 2.0 * std::abs(std::sin(phase * kTau * 2.0));
+    p.leg_l = 0.45 * std::sin(t);
+    p.leg_r = 0.45 * std::sin(t + kPi);
+    // cos(t + lead) > 0 from late stance through the forward swing; the 0.6
+    // lead starts the heel lift just before toe-off and peaks mid-recovery.
+    const double flex_l = std::cos(t + 0.6);
+    const double flex_r = std::cos(t + kPi + 0.6);
+    p.knee_l = 1.0 * (flex_l > 0.0 ? flex_l : 0.0);
+    p.knee_r = 1.0 * (flex_r > 0.0 ? flex_r : 0.0);
+    p.arm_l = 0.40 * std::sin(t + kPi);  // arms counter same-side legs
+    p.arm_r = 0.40 * std::sin(t);
+    // One bounce per step: 4.2 = 42 * (1 - cos(0.45)) keeps the straight
+    // leg's foot on the ground line at both stride extremes (scale 1).
+    p.bob = 4.2 * std::abs(std::sin(t));
     return p;
+}
+
+struct DogPose {
+    double pair_a;
+    double pair_b;
+    double fold_a;
+    double fold_b;
+    double tail;
+    double bob;
+};
+
+DogPose DogTrotPose(double phase) {
+    // Mirror of hello_world.py dog_pose: trot with diagonal leg pairs 180 deg
+    // apart at the walker's cadence, offset so it is not step-synced with the
+    // man. Folds are one-signed (lower leg drawn at angle - fold).
+    const double kPi = 3.14159265358979323846;
+    const double t = phase * kTau + 1.9;
+    DogPose p{};
+    p.pair_a = 0.60 * std::sin(t);        // front-left + rear-right
+    p.pair_b = 0.60 * std::sin(t + kPi);  // front-right + rear-left
+    const double fa = std::cos(t + 0.6);
+    const double fb = std::cos(t + kPi + 0.6);
+    p.fold_a = 0.9 * (fa > 0.0 ? fa : 0.0);
+    p.fold_b = 0.9 * (fb > 0.0 ? fb : 0.0);
+    p.tail = 0.25 * std::sin(t * 2.0);  // wag, twice per stride
+    // 3.3 = 19 * (1 - cos(0.6)): straight-pair paws stay on the ground line.
+    p.bob = 3.3 * std::abs(std::sin(t));
+    return p;
+}
+
+double ViewScale(double w, double h) {
+    // Figure scale for a client size: 400x200 baseline, floor 0.55.
+    return (std::max)(0.55, (std::min)(w / 400.0, h / 200.0));
 }
 
 void LimbEnd(double x, double y, double angle, double length, double* ox, double* oy) {
@@ -322,10 +365,11 @@ void DrawWalker(HWND hwnd, HDC hdc) {
 
     FillRect(hdc, &client, g_bgBrush);
 
-    const double scale = (std::max)(0.55, (std::min)(w / 400.0, h / 200.0));
+    const double scale = ViewScale(w, h);
     const Pose pose = WalkPose(g_phase);
     const double cx = g_x;
-    const double cy = h * 0.55 + pose.bob * scale;
+    const double base_cy = h * 0.55;  // un-bobbed body reference; anchors the ground
+    const double cy = base_cy + pose.bob * scale;
 
     const double head_r = 12.0 * scale;
     const double torso = 34.0 * scale;
@@ -340,8 +384,9 @@ void DrawWalker(HWND hwnd, HDC hdc) {
     const double head_cx = cx;
     const double head_cy = cy - head_r - 2.0 * scale;
 
-    // Ground line
-    const double ground_y = hip_y + upper_leg + lower_leg + 4.0 * scale;
+    // Ground line: anchored to the un-bobbed pose (does not bounce with the
+    // body) at exactly straight-leg reach, so planted feet touch it.
+    const double ground_y = base_cy + torso + upper_leg + lower_leg;
     HPEN groundPen = MakePen(kGroundColor, (std::max)(1, stroke - 1));
     HGDIOBJ oldPen = SelectObject(hdc, groundPen);
     LineTo2(hdc, 0, static_cast<int>(std::lround(ground_y)), w,
@@ -364,14 +409,52 @@ void DrawWalker(HWND hwnd, HDC hdc) {
             static_cast<int>(std::lround(head_cx + head_r)),
             static_cast<int>(std::lround(head_cy + head_r)));
 
+    // Face (right profile, facing the walking direction): eye dot, nose
+    // wedge poking past the head outline, short mouth line.
+    {
+        const int face_w = (std::max)(1, stroke - 1);
+        const double eye_r = (std::max)(1.2, head_r * 0.12);
+        const double eye_x = head_cx + head_r * 0.38;
+        const double eye_y = head_cy - head_r * 0.18;
+        HPEN facePen = MakePen(kFgColor, face_w);
+        HBRUSH eyeBrush = CreateSolidBrush(kFgColor);
+        HGDIOBJ prevPen = SelectObject(hdc, facePen);
+        HGDIOBJ prevBrush = SelectObject(hdc, eyeBrush);
+        Ellipse(hdc,
+                static_cast<int>(std::lround(eye_x - eye_r)),
+                static_cast<int>(std::lround(eye_y - eye_r)),
+                static_cast<int>(std::lround(eye_x + eye_r)),
+                static_cast<int>(std::lround(eye_y + eye_r)));
+        SelectObject(hdc, prevBrush);
+        const POINT nose[3] = {
+            {static_cast<LONG>(std::lround(head_cx + head_r * 0.92)),
+             static_cast<LONG>(std::lround(head_cy + head_r * 0.02))},
+            {static_cast<LONG>(std::lround(head_cx + head_r * 1.30)),
+             static_cast<LONG>(std::lround(head_cy + head_r * 0.14))},
+            {static_cast<LONG>(std::lround(head_cx + head_r * 0.88)),
+             static_cast<LONG>(std::lround(head_cy + head_r * 0.30))},
+        };
+        Polyline(hdc, nose, 3);
+        LineTo2(hdc,
+                static_cast<int>(std::lround(head_cx + head_r * 0.22)),
+                static_cast<int>(std::lround(head_cy + head_r * 0.55)),
+                static_cast<int>(std::lround(head_cx + head_r * 0.75)),
+                static_cast<int>(std::lround(head_cy + head_r * 0.48)));
+        SelectObject(hdc, prevPen);
+        DeleteObject(facePen);
+        DeleteObject(eyeBrush);
+    }
+
     SelectObject(hdc, oldBrush);
     SelectObject(hdc, oldPen);
     DeleteObject(fgPen);
 
-    // Hat: brim + crown (before limbs — match hello_world.py draw order)
+    // Hat: brim + crown (before limbs — match hello_world.py draw order).
+    // Crown uses the background brush so the top of the head circle (drawn
+    // earlier) is not visible inside the hat.
     HPEN hatPen = MakePen(kHatColor, stroke);
     oldPen = SelectObject(hdc, hatPen);
-    oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    oldBrush = SelectObject(hdc, g_bgBrush);
 
     const double brim_w = head_r * 1.7;
     const double brim_y = head_cy - head_r * 0.55;
@@ -407,13 +490,14 @@ void DrawWalker(HWND hwnd, HDC hdc) {
                 static_cast<int>(std::lround(hx)), static_cast<int>(std::lround(hy)));
     }
 
-    // Legs
+    // Legs: knee flexion folds the shin backward (heel toward the body), so
+    // the knee vertex points in the walking direction.
     const double legAngles[2] = {pose.leg_l, pose.leg_r};
     const double knees[2] = {pose.knee_l, pose.knee_r};
     for (int i = 0; i < 2; ++i) {
         double kx = 0, ky = 0, fx = 0, fy = 0;
         LimbEnd(cx, hip_y, legAngles[i], upper_leg, &kx, &ky);
-        LimbEnd(kx, ky, legAngles[i] + knees[i], lower_leg, &fx, &fy);
+        LimbEnd(kx, ky, legAngles[i] - knees[i], lower_leg, &fx, &fy);
         LineTo2(hdc, static_cast<int>(std::lround(cx)), static_cast<int>(std::lround(hip_y)),
                 static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)));
         LineTo2(hdc, static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)),
@@ -422,12 +506,99 @@ void DrawWalker(HWND hwnd, HDC hdc) {
 
     SelectObject(hdc, oldPen);
     DeleteObject(fgPen);
+
+    // Dog trotting behind the walker, on the same ground line; drawn one
+    // stroke thinner so it reads as the smaller figure.
+    {
+        const double kPi = 3.14159265358979323846;
+        const DogPose dpose = DogTrotPose(g_phase);
+        const int dog_w = (std::max)(1, stroke - 1);
+        const double d_upper = 10.0 * scale;
+        const double d_lower = 9.0 * scale;
+        const double half_body = 14.0 * scale;
+        const double dog_cx = cx - 65.0 * scale;
+        const double spine_y = ground_y - 19.0 * scale + dpose.bob * scale;
+        const double shoulder_x = dog_cx + half_body;
+        const double hip_x = dog_cx - half_body;
+
+        HPEN dogPen = MakePen(kFgColor, dog_w);
+        oldPen = SelectObject(hdc, dogPen);
+        oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+        // Spine
+        LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
+                static_cast<int>(std::lround(spine_y)),
+                static_cast<int>(std::lround(shoulder_x)),
+                static_cast<int>(std::lround(spine_y)));
+
+        // Legs: both legs of a diagonal pair share angle/fold; front pair
+        // hangs from the shoulder, rear pair from the hip.
+        const double attach[4] = {shoulder_x, shoulder_x, hip_x, hip_x};
+        const double dAng[4] = {dpose.pair_a, dpose.pair_b, dpose.pair_b, dpose.pair_a};
+        const double dFold[4] = {dpose.fold_a, dpose.fold_b, dpose.fold_b, dpose.fold_a};
+        for (int i = 0; i < 4; ++i) {
+            double kx = 0, ky = 0, px = 0, py = 0;
+            LimbEnd(attach[i], spine_y, dAng[i], d_upper, &kx, &ky);
+            LimbEnd(kx, ky, dAng[i] - dFold[i], d_lower, &px, &py);
+            LineTo2(hdc, static_cast<int>(std::lround(attach[i])),
+                    static_cast<int>(std::lround(spine_y)),
+                    static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)));
+            LineTo2(hdc, static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)),
+                    static_cast<int>(std::lround(px)), static_cast<int>(std::lround(py)));
+        }
+
+        // Tail: up-backward from the hip, wagging about its base angle.
+        double tx = 0, ty = 0;
+        LimbEnd(hip_x, spine_y, kPi + 0.55 + dpose.tail, 12.0 * scale, &tx, &ty);
+        LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
+                static_cast<int>(std::lround(spine_y)),
+                static_cast<int>(std::lround(tx)), static_cast<int>(std::lround(ty)));
+
+        // Neck (stops at the head outline), head, muzzle, ear.
+        LineTo2(hdc, static_cast<int>(std::lround(shoulder_x)),
+                static_cast<int>(std::lround(spine_y)),
+                static_cast<int>(std::lround(shoulder_x + 4.1 * scale)),
+                static_cast<int>(std::lround(spine_y - 5.9 * scale)));
+        const double dh_x = shoulder_x + 7.0 * scale;
+        const double dh_y = spine_y - 10.0 * scale;
+        const double dh_r = 5.0 * scale;
+        Ellipse(hdc,
+                static_cast<int>(std::lround(dh_x - dh_r)),
+                static_cast<int>(std::lround(dh_y - dh_r)),
+                static_cast<int>(std::lround(dh_x + dh_r)),
+                static_cast<int>(std::lround(dh_y + dh_r)));
+        LineTo2(hdc, static_cast<int>(std::lround(dh_x + 3.5 * scale)),
+                static_cast<int>(std::lround(dh_y + 0.8 * scale)),
+                static_cast<int>(std::lround(dh_x + 10.0 * scale)),
+                static_cast<int>(std::lround(dh_y + 2.2 * scale)));
+        LineTo2(hdc, static_cast<int>(std::lround(dh_x - 1.5 * scale)),
+                static_cast<int>(std::lround(dh_y - 4.0 * scale)),
+                static_cast<int>(std::lround(dh_x - 4.0 * scale)),
+                static_cast<int>(std::lround(dh_y - 9.5 * scale)));
+
+        // Eye: filled dot.
+        HBRUSH dogEyeBrush = CreateSolidBrush(kFgColor);
+        HGDIOBJ prevBrush = SelectObject(hdc, dogEyeBrush);
+        const double der = (std::max)(1.0, 0.9 * scale);
+        Ellipse(hdc,
+                static_cast<int>(std::lround(dh_x + 1.8 * scale - der)),
+                static_cast<int>(std::lround(dh_y - 1.2 * scale - der)),
+                static_cast<int>(std::lround(dh_x + 1.8 * scale + der)),
+                static_cast<int>(std::lround(dh_y - 1.2 * scale + der)));
+        SelectObject(hdc, prevBrush);
+        DeleteObject(dogEyeBrush);
+
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(dogPen);
+    }
 }
 
 void AdvanceAnimation(HWND hwnd) {
     RECT client = {};
     GetClientRect(hwnd, &client);
     const int w = (std::max)(1L, client.right - client.left);
+    const int h = (std::max)(1L, client.bottom - client.top);
 
     g_phase = g_phase + 0.045;
     if (g_phase >= 1.0) {
@@ -435,7 +606,9 @@ void AdvanceAnimation(HWND hwnd) {
     }
     const double speed = kWalkSpeed * (std::max)(w / 400.0, 0.75);
     g_x += speed;
-    if (g_x > w + 40.0) {
+    // Wrap only once the trailing dog (tail ~90 px behind at scale 1) has
+    // also left the right edge; both re-enter from the left, man first.
+    if (g_x > w + 40.0 + 90.0 * ViewScale(w, h)) {
         g_x = -40.0;
     }
     InvalidateRect(hwnd, nullptr, FALSE);

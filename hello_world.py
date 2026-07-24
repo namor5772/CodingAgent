@@ -102,21 +102,29 @@ def _parse_geometry(geo: str) -> tuple[int, int, int, int] | None:
 
 
 def walk_pose(phase: float) -> dict[str, float]:
-    """Return limb angles (radians) for a simple bipedal walk cycle.
+    """Return limb angles (radians) for a bipedal walk cycle.
 
-    phase is in [0, 1). Opposite limbs are 180 deg out of phase.
+    phase is in [0, 1); the legs run 180 deg out of phase. Each hip swings
+    A*sin(t) with +ve toward the walking direction (+x). Per leg: heel strike
+    at full forward swing with the knee straight, near-straight stance while
+    the body passes over the planted foot, then the heel lifts and the knee
+    flexes through the forward swing, straightening again before the next
+    heel strike. Knee flexion is one-signed (shin folds backward only) and is
+    drawn as hip_angle - knee.
     """
-    # Hip swing ~ +/- 28 deg; knee bends on the forward recovery.
-    swing = math.sin(phase * math.tau)
-    other = math.sin(phase * math.tau + math.pi)
-    leg_l = 0.48 * swing
-    leg_r = 0.48 * other
-    # Knee flex when leg is swinging forward (positive swing).
-    knee_l = 0.55 * max(0.0, -swing)
-    knee_r = 0.55 * max(0.0, -other)
-    arm_l = 0.40 * other  # arms counter leg
-    arm_r = 0.40 * swing
-    bob = 2.0 * abs(math.sin(phase * math.tau * 2.0))
+    t = phase * math.tau
+    leg_l = 0.45 * math.sin(t)
+    leg_r = 0.45 * math.sin(t + math.pi)
+    # cos(t + lead) > 0 from late stance through the forward swing; the 0.6
+    # lead starts the heel lift just before toe-off and peaks mid-recovery.
+    knee_l = 1.0 * max(0.0, math.cos(t + 0.6))
+    knee_r = 1.0 * max(0.0, math.cos(t + math.pi + 0.6))
+    arm_l = 0.40 * math.sin(t + math.pi)  # arms counter same-side legs
+    arm_r = 0.40 * math.sin(t)
+    # One bounce per step: tallest as the stance leg passes vertical, lowest
+    # at full stride split. 4.2 = 42 * (1 - cos(0.45)) keeps the straight
+    # leg's foot on the ground line at both extremes (leg = 42 px at scale 1).
+    bob = 4.2 * abs(math.sin(t))
     return {
         "leg_l": leg_l,
         "leg_r": leg_r,
@@ -126,6 +134,39 @@ def walk_pose(phase: float) -> dict[str, float]:
         "arm_r": arm_r,
         "bob": bob,
     }
+
+
+def dog_pose(phase: float) -> dict[str, float]:
+    """Return angles (radians) for a trotting dog.
+
+    Trot: diagonal leg pairs (front-left + rear-right, front-right +
+    rear-left) move together, 180 deg apart, at the walker's cadence but
+    offset so the trot is not step-synced with the man. Same conventions as
+    walk_pose: folds are one-signed (lower leg drawn at angle - fold) and
+    bob is px at scale 1.
+    """
+    t = phase * math.tau + 1.9
+    pair_a = 0.60 * math.sin(t)  # front-left + rear-right
+    pair_b = 0.60 * math.sin(t + math.pi)  # front-right + rear-left
+    fold_a = 0.9 * max(0.0, math.cos(t + 0.6))
+    fold_b = 0.9 * max(0.0, math.cos(t + math.pi + 0.6))
+    tail = 0.25 * math.sin(t * 2.0)  # wag, twice per stride
+    # 3.3 = 19 * (1 - cos(0.6)): the straight pair's paws stay on the ground
+    # line at both stride extremes (dog leg = 19 px at scale 1).
+    bob = 3.3 * abs(math.sin(t))
+    return {
+        "pair_a": pair_a,
+        "pair_b": pair_b,
+        "fold_a": fold_a,
+        "fold_b": fold_b,
+        "tail": tail,
+        "bob": bob,
+    }
+
+
+def view_scale(w: float, h: float) -> float:
+    """Figure scale for a client size: 400x200 baseline, floor 0.55."""
+    return max(min(w / 400.0, h / 200.0), 0.55)
 
 
 def limb_end(x: float, y: float, angle: float, length: float) -> tuple[float, float]:
@@ -225,10 +266,13 @@ class WalkerApp:
     def _tick(self) -> None:
         self.phase = (self.phase + 0.045) % 1.0
         w = max(self.canvas.winfo_width(), 1)
+        h = max(self.canvas.winfo_height(), 1)
         # Scale speed lightly with width so a lap takes a similar time.
         speed = WALK_SPEED * max(w / 400.0, 0.75)
         self.x += speed
-        if self.x > w + 40:
+        # Wrap only once the trailing dog (tail ~90 px behind at scale 1) has
+        # also left the right edge; both re-enter from the left, man first.
+        if self.x > w + 40 + 90 * view_scale(w, h):
             self.x = -40.0
         self._draw()
         self._after_id = self.root.after(FRAME_MS, self._tick)
@@ -240,12 +284,12 @@ class WalkerApp:
         h = max(c.winfo_height(), 1)
 
         # Scale figure with the shorter window dimension; baseline fits 200px height.
-        scale = min(w / 400.0, h / 200.0)
-        scale = max(scale, 0.55)
+        scale = view_scale(w, h)
 
         pose = walk_pose(self.phase)
         cx = self.x
-        cy = h * 0.55 + pose["bob"] * scale
+        base_cy = h * 0.55  # un-bobbed body reference; anchors the ground line
+        cy = base_cy + pose["bob"] * scale
 
         head_r = 12 * scale
         torso = 34 * scale
@@ -259,8 +303,9 @@ class WalkerApp:
         shoulder_y = cy + 8 * scale
         head_cx, head_cy = cx, cy - head_r - 2 * scale
 
-        # Ground line
-        ground_y = hip_y + upper_leg + lower_leg + 4 * scale
+        # Ground line: anchored to the un-bobbed pose (does not bounce with the
+        # body) at exactly straight-leg reach, so planted feet touch it.
+        ground_y = base_cy + torso + upper_leg + lower_leg
         c.create_line(0, ground_y, w, ground_y, fill="#2a2a44", width=max(1, stroke - 1))
 
         # Torso
@@ -274,6 +319,42 @@ class WalkerApp:
             head_cy + head_r,
             outline=FG,
             width=stroke,
+        )
+
+        # Face (right profile, facing the walking direction): eye dot, nose
+        # wedge poking past the head outline, short mouth line.
+        face_w = max(1, stroke - 1)
+        eye_r = max(1.2, head_r * 0.12)
+        eye_x = head_cx + head_r * 0.38
+        eye_y = head_cy - head_r * 0.18
+        c.create_oval(
+            eye_x - eye_r,
+            eye_y - eye_r,
+            eye_x + eye_r,
+            eye_y + eye_r,
+            fill=FG,
+            outline=FG,
+        )
+        c.create_line(
+            head_cx + head_r * 0.92,
+            head_cy + head_r * 0.02,
+            head_cx + head_r * 1.30,
+            head_cy + head_r * 0.14,
+            head_cx + head_r * 0.88,
+            head_cy + head_r * 0.30,
+            fill=FG,
+            width=face_w,
+            capstyle=tk.ROUND,
+            joinstyle=tk.ROUND,
+        )
+        c.create_line(
+            head_cx + head_r * 0.22,
+            head_cy + head_r * 0.55,
+            head_cx + head_r * 0.75,
+            head_cy + head_r * 0.48,
+            fill=FG,
+            width=face_w,
+            capstyle=tk.ROUND,
         )
 
         # Hat: brim + flat crown (top hat)
@@ -290,12 +371,15 @@ class WalkerApp:
         )
         crown_w = head_r * 1.05
         crown_h = head_r * 1.15
+        # Crown interior is filled with the background color so the top of
+        # the head circle (drawn earlier) is not visible inside the hat.
         c.create_rectangle(
             head_cx - crown_w,
             brim_y - crown_h,
             head_cx + crown_w,
             brim_y,
             outline=HAT,
+            fill=BG,
             width=stroke,
         )
 
@@ -309,12 +393,87 @@ class WalkerApp:
             c.create_line(cx, shoulder_y, ex, ey, fill=FG, width=stroke, capstyle=tk.ROUND)
             c.create_line(ex, ey, hx, hy, fill=FG, width=stroke, capstyle=tk.ROUND)
 
-        # Legs from hips with simple knee
+        # Legs from hips; knee flexion folds the shin backward (heel toward
+        # the body), so the knee vertex points in the walking direction.
         for hip_ang, knee in ((pose["leg_l"], pose["knee_l"]), (pose["leg_r"], pose["knee_r"])):
             kx, ky = limb_end(cx, hip_y, hip_ang, upper_leg)
-            fx, fy = limb_end(kx, ky, hip_ang + knee, lower_leg)
+            fx, fy = limb_end(kx, ky, hip_ang - knee, lower_leg)
             c.create_line(cx, hip_y, kx, ky, fill=FG, width=stroke, capstyle=tk.ROUND)
             c.create_line(kx, ky, fx, fy, fill=FG, width=stroke, capstyle=tk.ROUND)
+
+        # Dog trotting behind the walker, on the same ground line; drawn one
+        # stroke thinner so it reads as the smaller figure.
+        dpose = dog_pose(self.phase)
+        dog_w = max(1, stroke - 1)
+        d_upper = 10 * scale
+        d_lower = 9 * scale
+        half_body = 14 * scale
+        dog_cx = cx - 65 * scale
+        spine_y = ground_y - 19 * scale + dpose["bob"] * scale
+        shoulder_x = dog_cx + half_body
+        hip_x = dog_cx - half_body
+
+        # Spine
+        c.create_line(hip_x, spine_y, shoulder_x, spine_y, fill=FG, width=dog_w, capstyle=tk.ROUND)
+
+        # Legs: both legs of a diagonal pair share angle/fold; front pair
+        # hangs from the shoulder, rear pair from the hip.
+        for ax, ang, fold in (
+            (shoulder_x, dpose["pair_a"], dpose["fold_a"]),
+            (shoulder_x, dpose["pair_b"], dpose["fold_b"]),
+            (hip_x, dpose["pair_b"], dpose["fold_b"]),
+            (hip_x, dpose["pair_a"], dpose["fold_a"]),
+        ):
+            kx, ky = limb_end(ax, spine_y, ang, d_upper)
+            px_, py_ = limb_end(kx, ky, ang - fold, d_lower)
+            c.create_line(ax, spine_y, kx, ky, fill=FG, width=dog_w, capstyle=tk.ROUND)
+            c.create_line(kx, ky, px_, py_, fill=FG, width=dog_w, capstyle=tk.ROUND)
+
+        # Tail: up-backward from the hip, wagging about its base angle.
+        tx, ty = limb_end(hip_x, spine_y, math.pi + 0.55 + dpose["tail"], 12 * scale)
+        c.create_line(hip_x, spine_y, tx, ty, fill=FG, width=dog_w, capstyle=tk.ROUND)
+
+        # Neck (stops at the head outline), head, muzzle, ear, eye.
+        c.create_line(
+            shoulder_x,
+            spine_y,
+            shoulder_x + 4.1 * scale,
+            spine_y - 5.9 * scale,
+            fill=FG,
+            width=dog_w,
+            capstyle=tk.ROUND,
+        )
+        dh_x = shoulder_x + 7 * scale
+        dh_y = spine_y - 10 * scale
+        dh_r = 5 * scale
+        c.create_oval(dh_x - dh_r, dh_y - dh_r, dh_x + dh_r, dh_y + dh_r, outline=FG, width=dog_w)
+        c.create_line(
+            dh_x + 3.5 * scale,
+            dh_y + 0.8 * scale,
+            dh_x + 10 * scale,
+            dh_y + 2.2 * scale,
+            fill=FG,
+            width=dog_w,
+            capstyle=tk.ROUND,
+        )
+        c.create_line(
+            dh_x - 1.5 * scale,
+            dh_y - 4 * scale,
+            dh_x - 4 * scale,
+            dh_y - 9.5 * scale,
+            fill=FG,
+            width=dog_w,
+            capstyle=tk.ROUND,
+        )
+        der = max(1.0, 0.9 * scale)
+        c.create_oval(
+            dh_x + 1.8 * scale - der,
+            dh_y - 1.2 * scale - der,
+            dh_x + 1.8 * scale + der,
+            dh_y - 1.2 * scale + der,
+            fill=FG,
+            outline=FG,
+        )
 
     def shutdown(self) -> None:
         if self._after_id is not None:

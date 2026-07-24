@@ -19,3 +19,6 @@ Thumbs.db
 hello_world_cpp.exe
 hello_world_cpp
 *.dSYM/
+
+# Rendered media (e.g. hello_world_animation_720p.mp4)
+*.mp4
