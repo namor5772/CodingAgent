@@ -2,7 +2,7 @@
 
 ## What this is
 
-Minimal desktop demo: a window titled **Hello World** that plays a short looping animation of a stick figure with a top hat and a simple profile face (eye, nose, mouth) walking naturally across a dark canvas, followed by a stick-figure dog trotting behind him, plus Desktop shortcuts with a custom icon.
+Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure with a top hat and a simple profile face (eye, nose, mouth) walking naturally across a dark canvas, followed by a stick-figure dog trotting behind him; tab **two** is a placeholder page. Plus Desktop shortcuts with a custom icon.
 
 Implementations:
 
@@ -122,8 +122,8 @@ macOS "shortcuts" are minimal `.app` bundles (shell launcher in `Contents/MacOS`
 ## Conventions
 
 - Prefer **stdlib** / system libs for app runtime; optional tools (Pillow, PowerShell COM, MSVC, sips/iconutil) only for asset/shortcut/build setup.
-- Keep the UI single-window and minimal unless the task expands scope.
-- Match the Python UI when changing either C++ clone (title, walk cycle math, profile face, hat crown filled with the background color so the head is hidden inside it, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
+- UI baseline is the **two-tab layout** in all three apps: tab **one** hosts the animation, tab **two** shows a centered `TAB TWO PLACEHOLDER` label on the dark background (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL` with child windows toggled on `TCN_SELCHANGE`, macOS `NSTabView`). Keep tab structure and labels in parity across implementations.
+- Match the Python UI when changing either C++ clone (title, two-tab layout, walk cycle math, profile face, hat crown filled with the background color so the head is hidden inside it, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
 - Walk-cycle invariants (all three apps): hips swing `0.45*sin(t)` with legs 180 deg apart; knee flexion is one-signed (`max(0, cos(t + 0.6))`) and the shin is drawn at `hip_angle - knee` so knees only fold backward (knee vertex points in the walking direction); bob is `4.2*|sin(t)|` (one bounce per step) and the ground line is anchored to the un-bobbed pose at straight-leg reach so planted feet touch it. Feet are `8*scale` lines from the ankle at the absolute (ground-anchored, not shin-relative) angle `pi/2 + 0.4*max(0, sin t) - 0.8*knee*max(0, -sin t)` per leg: `pi/2` = flat pointing forward, toes-up into heel strike, flat through stance, heel-up/toes-down through toe-off into early swing.
 - Dog invariants (all three apps): trots `65*scale` behind the man on the same ground line, drawn one stroke thinner; diagonal leg pairs `0.60*sin` at the walker's cadence with phase offset `+1.9`, one-signed folds `0.9*max(0, cos(t + 0.6))` drawn as `angle - fold`, spine bob `3.3*|sin(t)|` (= `19*(1 - cos 0.6)`, paws stay planted), tail wag `0.25*sin(2t)` about base angle `pi + 0.55`; the walker's x wraps at `w + 40 + 90*scale` (dog fully off-screen) and respawns at `-40`.
 - Window geometry persistence is **per app**: Python -> `hello_world_geometry.json`, C++ -> `hello_world_cpp_geometry.json` in the same per-user CodingAgent config dir (`%LOCALAPPDATA%` / `~/Library/Application Support` / XDG). Do not share one file across implementations.
