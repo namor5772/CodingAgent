@@ -1,6 +1,6 @@
 # CodingAgent
 
-Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him; tab **two** is a placeholder page. Plus optional Desktop shortcuts with a custom icon, and **per-app window geometry persistence** (position and client size restored on the next launch).
+Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him; tab **two** is a placeholder page. Plus optional Desktop shortcuts with a custom icon, and **per-app window state persistence** (position, client size, and selected tab restored on the next launch).
 
 Implementations ship side by side:
 
@@ -174,21 +174,21 @@ On macOS, `python3 create_icon.py` writes `.ico`; the shortcut scripts also prod
 All apps aim to match:
 
 - Window title **Hello World**, dark canvas `#1a1a2e`, figure `#eaeaea`, hat `#c9a227`, ground `#2a2a44`
-- Two-tab layout with tab **one** selected at launch: tab **one** hosts the animation, tab **two** shows a centered **TAB TWO PLACEHOLDER** label on the same dark background (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL`, macOS `NSTabView`)
+- Two-tab layout: tab **one** hosts the animation, tab **two** shows a centered **TAB TWO PLACEHOLDER** label on the same dark background (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL`, macOS `NSTabView`); the selected tab is persisted and restored on the next launch (tab **one** on first run)
 - Default **client** size 400x200 and minimum **client** size 300x150 (Win32 converts client to outer size with `AdjustWindowRectEx`; macOS uses `contentRect` / `setContentMinSize` so chrome does not shrink the canvas vs Tk)
 - ~50 ms frame timer, shared walk-cycle math and scaling: hips swing +/-0.45 rad, knees flex one way only (near-straight stance leg, knee bent toward the walking direction during the forward swing), one body-bob per step sized so a planted straight leg's foot touches the fixed ground line, and line feet that lie flat on the ground through stance, point toes-up into heel strike, and lift heel-up/toes-down through push-off
 - Simple profile face (eye dot, nose wedge, mouth) facing the walking direction; the hat crown is filled with the background color so the head outline stays hidden inside the hat
 - Stick-figure dog trotting ~65 px (scaled) behind the walker: diagonal leg pairs (trot) with the same one-way lower-leg folds, wagging tail, pointed ear, muzzle and eye dot; the walk wraps around only after the dog has also cleared the right edge
 - Bundled icon for the window and Desktop shortcuts (`.ico` on Windows, `.icns` on macOS)
-- Window geometry (position/size) is restored on launch and saved on close
+- Window geometry (position/size) and the selected tab are restored on launch and saved on close
 
 Windows C++ draws the animation in a child window of the tab control (the placeholder is a second child window, shown/hidden on `TCN_SELCHANGE`) with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, face, hat, arms, legs, then the dog).
 
-macOS C++ embeds the animation view as the first `NSTabView` item (a layer-backed placeholder with a centered label in the second) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order.
+macOS C++ embeds the animation view as the first `NSTabView` item (a layer-backed placeholder with a centered label in the second) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order. The window forces the dark-aqua appearance regardless of the system setting — under light aqua the unselected tab label draws dark-on-dark over the canvas and becomes unreadable.
 
-## Window geometry persistence
+## Window state persistence
 
-Each implementation remembers its own window **position and client size** across launches. Values are written as small JSON files under a per-user config directory (not in the git tree). Python and C++ **do not share** the same file, so moving or resizing one app does not affect the other.
+Each implementation remembers its own window **position, client size, and selected tab** across launches. Values are written as small JSON files under a per-user config directory (not in the git tree). Python and C++ **do not share** the same file, so moving or resizing one app does not affect the other.
 
 | App | Config file |
 |-----|-------------|
@@ -203,22 +203,25 @@ Each implementation remembers its own window **position and client size** across
 
 ### JSON shape
 
-Both apps read and write the same keys (`w` / `h` are **client** width and height; `x` / `y` are the outer frame top-left in a top-left origin, including on macOS where AppKit is converted on save/load):
+Both apps read and write the same keys (`w` / `h` are **client** width and height; `x` / `y` are the outer frame top-left in a top-left origin, including on macOS where AppKit is converted on save/load; `tab` is the selected tab index):
 
 ```json
 {
   "x": 120,
   "y": 80,
   "w": 400,
-  "h": 200
+  "h": 200,
+  "tab": 0
 }
 ```
 
+`tab` is `0` (tab **one**) or `1` (tab **two**). It is optional on load: files written before tab persistence existed — or any value other than `1` — select tab one.
+
 ### When it saves and restores
 
-- **Restore:** on startup, if the file exists and parses cleanly.
-- **Save:** when the window is closing (Python `WM_DELETE_WINDOW` / destroy path; Win32 `WM_CLOSE`; macOS window will-close). Minimized windows are skipped on Win32 so iconified coordinates are not stored.
-- **Fallback:** missing file, corrupt JSON, size below the 300x150 client minimum, absurd coordinates, or a restored top-left that appears off-screen → default **400x200** client size (re-centered when possible).
+- **Restore:** on startup, if the file exists and parses cleanly (geometry and selected tab).
+- **Save:** when the window is closing (Python `WM_DELETE_WINDOW` / destroy path; Win32 `WM_CLOSE`; macOS app termination). The selected tab is written in the same pass. Minimized windows are skipped on Win32 so iconified coordinates are not stored.
+- **Fallback:** missing file, corrupt JSON, size below the 300x150 client minimum, absurd coordinates, or a restored top-left that appears off-screen → default **400x200** client size (re-centered when possible) with tab **one** selected.
 
 ### Reset to defaults
 

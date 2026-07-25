@@ -30,6 +30,7 @@ struct WindowGeometry {
     int y = 0;
     int w = kDefaultWidth;
     int h = kDefaultHeight;
+    int tab = 0;  // selected tab index (0 = one, 1 = two); optional in the JSON
     bool valid = false;
 };
 
@@ -54,6 +55,9 @@ HICON g_iconSmall = nullptr;
 HWND g_hwndTab = nullptr;
 HWND g_hwndAnim = nullptr;
 HWND g_hwndPlaceholder = nullptr;
+
+// Tab restored from the geometry JSON; applied when the tab control is created.
+int g_initialTab = 0;
 
 const wchar_t kAnimClass[] = L"CodingAgentHelloWorldAnimation";
 const wchar_t kPlaceholderClass[] = L"CodingAgentHelloWorldPlaceholder";
@@ -244,6 +248,12 @@ WindowGeometry LoadGeometry() {
     g.y = y;
     g.w = w;
     g.h = h;
+    // "tab" is optional (older files lack it); anything but 1 selects tab one.
+    const char* pt = strstr(buf, "\"tab\"");
+    int tab = 0;
+    if (pt && sscanf_s(pt, "\"tab\"%*[^0-9-]%d", &tab) == 1 && tab == 1) {
+        g.tab = 1;
+    }
     g.valid = true;
     return g;
 }
@@ -261,8 +271,8 @@ void SaveGeometry(const WindowGeometry& g) {
         return;
     }
     std::fprintf(fp,
-                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d\n}\n",
-                 g.x, g.y, g.w, g.h);
+                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d,\n  \"tab\": %d\n}\n",
+                 g.x, g.y, g.w, g.h, g.tab == 1 ? 1 : 0);
     fclose(fp);
 }
 
@@ -288,6 +298,10 @@ void SaveGeometryFromHwnd(HWND hwnd) {
     }
     if (g.h < kMinHeight) {
         g.h = kMinHeight;
+    }
+    if (g_hwndTab) {
+        const int sel = static_cast<int>(SendMessageW(g_hwndTab, TCM_GETCURSEL, 0, 0));
+        g.tab = sel == 1 ? 1 : 0;
     }
     g.valid = true;
     SaveGeometry(g);
@@ -814,6 +828,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             nullptr,
             instance,
             nullptr);
+
+        // Restore the saved tab. TCM_SETCURSEL does not send TCN_SELCHANGE,
+        // so toggle the child panes here as well.
+        if (g_hwndTab && g_initialTab == 1) {
+            SendMessageW(g_hwndTab, TCM_SETCURSEL, 1, 0);
+            ShowWindow(g_hwndAnim, SW_HIDE);
+            ShowWindow(g_hwndPlaceholder, SW_SHOW);
+        }
         return 0;
     }
 
@@ -921,6 +943,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCmd) {
     if (saved.valid) {
         clientW = saved.w;
         clientH = saved.h;
+        g_initialTab = saved.tab;
     }
 
     int outerW = clientW;

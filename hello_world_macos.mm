@@ -23,6 +23,7 @@ struct WindowGeometry {
     int y = 0;
     int w = kDefaultWidth;
     int h = kDefaultHeight;
+    int tab = 0;  // selected tab index (0 = one, 1 = two); optional in the JSON
     bool valid = false;
 };
 
@@ -205,6 +206,12 @@ WindowGeometry LoadGeometry() {
     g.y = y;
     g.w = w;
     g.h = h;
+    // "tab" is optional (older files lack it); anything but 1 selects tab one.
+    const char* pt = std::strstr(buf, "\"tab\"");
+    int tab = 0;
+    if (pt && std::sscanf(pt, "\"tab\"%*[^0-9-]%d", &tab) == 1 && tab == 1) {
+        g.tab = 1;
+    }
     g.valid = true;
     return g;
 }
@@ -219,8 +226,8 @@ void SaveGeometry(const WindowGeometry& g) {
         return;
     }
     std::fprintf(fp,
-                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d\n}\n",
-                 g.x, g.y, g.w, g.h);
+                 "{\n  \"x\": %d,\n  \"y\": %d,\n  \"w\": %d,\n  \"h\": %d,\n  \"tab\": %d\n}\n",
+                 g.x, g.y, g.w, g.h, g.tab == 1 ? 1 : 0);
     std::fclose(fp);
 }
 
@@ -244,6 +251,11 @@ void SaveGeometryFromWindow(NSWindow* window) {
     }
     if (g.h < kMinHeight) {
         g.h = kMinHeight;
+    }
+    if ([window.contentView isKindOfClass:[NSTabView class]]) {
+        NSTabView* tabView = static_cast<NSTabView*>(window.contentView);
+        NSTabViewItem* sel = tabView.selectedTabViewItem;
+        g.tab = (sel && [tabView indexOfTabViewItem:sel] == 1) ? 1 : 0;
     }
     g.valid = true;
     SaveGeometry(g);
@@ -573,6 +585,10 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
     self.window.title = @"Hello World";
+    // Force dark appearance regardless of the system setting: with light aqua
+    // the unselected NSTabView segment draws dark text over the dark canvas
+    // and the "two" tab is unreadable/invisible.
+    self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.window.backgroundColor =
         [NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0];
     [self.window setContentMinSize:NSMakeSize(kMinWidth, kMinHeight)];
@@ -623,8 +639,13 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     placeholder.layer.backgroundColor =
         [[NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0] CGColor];
 
-    NSTextField* label = [[NSTextField alloc] initWithFrame:placeholder.bounds];
-    label.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    // Single-line strip centered vertically (a full-bounds NSTextField draws
+    // its text at the top); flexible margins keep it centered on resize.
+    const CGFloat labelH = 40;
+    NSTextField* label = [[NSTextField alloc]
+        initWithFrame:NSMakeRect(0, (placeholder.bounds.size.height - labelH) / 2,
+                                 placeholder.bounds.size.width, labelH)];
+    label.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
     label.stringValue = @"TAB TWO PLACEHOLDER";
     label.editable = NO;
     label.bordered = NO;
@@ -636,7 +657,7 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     itemTwo.view = placeholder;
     [tabView addTabViewItem:itemTwo];
 
-    [tabView selectTabViewItem:itemOne];
+    [tabView selectTabViewItem:(saved.valid && saved.tab == 1) ? itemTwo : itemOne];
     self.window.contentView = tabView;
 
     [self tryLoadIcon];

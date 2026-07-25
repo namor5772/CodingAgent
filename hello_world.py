@@ -38,7 +38,7 @@ def _config_path() -> Path:
 
 
 def load_geometry() -> dict[str, int] | None:
-    """Return {x, y, w, h} client geometry if the config is valid, else None."""
+    """Return {x, y, w, h, tab} client geometry if the config is valid, else None."""
     path = _config_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -58,14 +58,27 @@ def load_geometry() -> dict[str, int] | None:
     # Reject absurd values (corrupt file / multi-monitor gone wrong).
     if abs(x) > 100_000 or abs(y) > 100_000 or w > 20_000 or h > 20_000:
         return None
-    return {"x": x, "y": y, "w": w, "h": h}
+    # Selected tab is optional (older files) — anything but 1 means tab one.
+    try:
+        tab = int(data.get("tab", 0))
+    except (TypeError, ValueError):
+        tab = 0
+    if tab not in (0, 1):
+        tab = 0
+    return {"x": x, "y": y, "w": w, "h": h, "tab": tab}
 
 
-def save_geometry(x: int, y: int, w: int, h: int) -> None:
+def save_geometry(x: int, y: int, w: int, h: int, tab: int = 0) -> None:
     path = _config_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+        payload = {
+            "x": int(x),
+            "y": int(y),
+            "w": int(w),
+            "h": int(h),
+            "tab": 1 if tab == 1 else 0,
+        }
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
@@ -232,6 +245,9 @@ class WalkerApp:
         placeholder.pack(expand=True, fill=tk.BOTH)
         self.notebook.add(tab_two, text="two")
 
+        if saved is not None and saved.get("tab") == 1:
+            self.notebook.select(tab_two)
+
         self.phase = 0.0
         self.x = 40.0
         self._after_id: str | None = None
@@ -278,7 +294,7 @@ class WalkerApp:
                 pass
 
     def persist_geometry(self) -> None:
-        """Write current window position and size for the next launch."""
+        """Write current window position, size, and selected tab for the next launch."""
         try:
             self.root.update_idletasks()
             # Prefer parsing geometry() ("WxH+X+Y", X/Y may be negative) so we
@@ -292,7 +308,11 @@ class WalkerApp:
                 y = int(self.root.winfo_y())
                 w = int(self.root.winfo_width())
                 h = int(self.root.winfo_height())
-            save_geometry(x, y, max(MIN_WIDTH, w), max(MIN_HEIGHT, h))
+            try:
+                tab = self.notebook.index(self.notebook.select())
+            except (tk.TclError, ValueError):
+                tab = 0
+            save_geometry(x, y, max(MIN_WIDTH, w), max(MIN_HEIGHT, h), tab)
         except (tk.TclError, ValueError):
             pass
 
