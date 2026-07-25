@@ -11,6 +11,7 @@
 #define NOMINMAX
 
 #include <windows.h>
+#include <commctrl.h>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -49,6 +50,13 @@ const wchar_t kWindowTitle[] = L"Hello World";
 HBRUSH g_bgBrush = nullptr;
 HICON g_iconBig = nullptr;
 HICON g_iconSmall = nullptr;
+
+HWND g_hwndTab = nullptr;
+HWND g_hwndAnim = nullptr;
+HWND g_hwndPlaceholder = nullptr;
+
+const wchar_t kAnimClass[] = L"CodingAgentHelloWorldAnimation";
+const wchar_t kPlaceholderClass[] = L"CodingAgentHelloWorldPlaceholder";
 
 double g_phase = 0.0;
 double g_x = 40.0;
@@ -632,7 +640,7 @@ void AdvanceAnimation(HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK AnimationWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
         SetTimer(hwnd, kTimerId, kFrameMs, nullptr);
@@ -644,23 +652,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
 
-    case WM_GETMINMAXINFO: {
-        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-        // ptMinTrackSize is outer size; convert from desired min client (match Tk minsize).
-        const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
-        const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
-        int outerW = kMinWidth;
-        int outerH = kMinHeight;
-        if (ClientSizeToOuter(style, exStyle, kMinWidth, kMinHeight, &outerW, &outerH)) {
-            info->ptMinTrackSize.x = outerW;
-            info->ptMinTrackSize.y = outerH;
-        } else {
-            info->ptMinTrackSize.x = kMinWidth;
-            info->ptMinTrackSize.y = kMinHeight;
-        }
-        return 0;
-    }
-
     case WM_ERASEBKGND:
         // Painted fully in WM_PAINT; skip default erase to avoid flicker.
         return 1;
@@ -669,7 +660,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         PAINTSTRUCT ps = {};
         HDC hdc = BeginPaint(hwnd, &ps);
 
-        // Double-buffer to reduce flicker while animating.
         RECT client = {};
         GetClientRect(hwnd, &client);
         const int w = client.right - client.left;
@@ -679,10 +669,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        // Double-buffer to reduce flicker while animating.
         HDC memDC = CreateCompatibleDC(hdc);
         HBITMAP memBmp = memDC ? CreateCompatibleBitmap(hdc, w, h) : nullptr;
         if (!memDC || !memBmp) {
-            // Fallback: draw directly on the paint DC if offscreen buffer fails.
             if (memBmp) {
                 DeleteObject(memBmp);
             }
@@ -706,13 +696,183 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
 
+    case WM_DESTROY:
+        KillTimer(hwnd, kTimerId);
+        return 0;
+
+    default:
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+}
+
+LRESULT CALLBACK PlaceholderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps = {};
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT client = {};
+        GetClientRect(hwnd, &client);
+        FillRect(hdc, &client, g_bgBrush);
+
+        const int h = client.bottom - client.top;
+        const int fontHeight = (std::max)(16, h / 10);
+        HFONT font = CreateFontW(
+            -fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        HGDIOBJ oldFont = SelectObject(hdc, font ? font : GetStockObject(DEFAULT_GUI_FONT));
+        SetTextColor(hdc, kFgColor);
+        SetBkMode(hdc, TRANSPARENT);
+
+        const wchar_t text[] = L"TAB TWO PLACEHOLDER";
+        DrawTextW(hdc, text, -1, &client, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        SelectObject(hdc, oldFont);
+        if (font) {
+            DeleteObject(font);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    default:
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+}
+
+bool RegisterChildClasses(HINSTANCE instance) {
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = AnimationWndProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.lpszClassName = kAnimClass;
+
+    if (!RegisterClassExW(&wc)) {
+        return false;
+    }
+
+    wc.lpfnWndProc = PlaceholderWndProc;
+    wc.lpszClassName = kPlaceholderClass;
+
+    return RegisterClassExW(&wc) != 0;
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE: {
+        HINSTANCE instance = reinterpret_cast<LPCREATESTRUCTW>(lParam)->hInstance;
+
+        INITCOMMONCONTROLSEX iccex = {};
+        iccex.dwSize = sizeof(iccex);
+        iccex.dwICC = ICC_TAB_CLASSES;
+        InitCommonControlsEx(&iccex);
+
+        g_hwndTab = CreateWindowExW(
+            0,
+            WC_TABCONTROLW,
+            nullptr,
+            WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
+            0, 0, 0, 0,
+            hwnd,
+            nullptr,
+            instance,
+            nullptr);
+        if (g_hwndTab) {
+            TCITEMW item = {};
+            item.mask = TCIF_TEXT;
+            item.pszText = const_cast<LPWSTR>(L"one");
+            SendMessageW(g_hwndTab, TCM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&item));
+            item.pszText = const_cast<LPWSTR>(L"two");
+            SendMessageW(g_hwndTab, TCM_INSERTITEMW, 1, reinterpret_cast<LPARAM>(&item));
+        }
+
+        g_hwndAnim = CreateWindowExW(
+            0,
+            kAnimClass,
+            nullptr,
+            WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
+            0, 0, 0, 0,
+            g_hwndTab,
+            nullptr,
+            instance,
+            nullptr);
+
+        g_hwndPlaceholder = CreateWindowExW(
+            0,
+            kPlaceholderClass,
+            nullptr,
+            WS_CHILD | WS_CLIPSIBLINGS,
+            0, 0, 0, 0,
+            g_hwndTab,
+            nullptr,
+            instance,
+            nullptr);
+        return 0;
+    }
+
+    case WM_SIZE: {
+        if (!g_hwndTab) {
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
+        }
+        const int w = LOWORD(lParam);
+        const int h = HIWORD(lParam);
+        MoveWindow(g_hwndTab, 0, 0, w, h, TRUE);
+
+        RECT rc = {};
+        GetClientRect(g_hwndTab, &rc);
+        SendMessageW(g_hwndTab, TCM_ADJUSTRECT, FALSE, reinterpret_cast<LPARAM>(&rc));
+        const int paneW = rc.right - rc.left;
+        const int paneH = rc.bottom - rc.top;
+        MoveWindow(g_hwndAnim, rc.left, rc.top, paneW, paneH, TRUE);
+        MoveWindow(g_hwndPlaceholder, rc.left, rc.top, paneW, paneH, TRUE);
+        return 0;
+    }
+
+    case WM_NOTIFY: {
+        const LPNMHDR hdr = reinterpret_cast<LPNMHDR>(lParam);
+        if (hdr && hdr->hwndFrom == g_hwndTab && hdr->code == TCN_SELCHANGE) {
+            const int sel = static_cast<int>(SendMessageW(g_hwndTab, TCM_GETCURSEL, 0, 0));
+            ShowWindow(g_hwndAnim, sel == 0 ? SW_SHOW : SW_HIDE);
+            ShowWindow(g_hwndPlaceholder, sel == 0 ? SW_HIDE : SW_SHOW);
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        // ptMinTrackSize is outer size; convert from desired min client (match Tk minsize).
+        const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+        const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+        int outerW = kMinWidth;
+        int outerH = kMinHeight;
+        if (ClientSizeToOuter(style, exStyle, kMinWidth, kMinHeight, &outerW, &outerH)) {
+            info->ptMinTrackSize.x = outerW;
+            info->ptMinTrackSize.y = outerH;
+        } else {
+            info->ptMinTrackSize.x = kMinWidth;
+            info->ptMinTrackSize.y = kMinHeight;
+        }
+        return 0;
+    }
+
+    case WM_ERASEBKGND:
+        // Painted fully in WM_PAINT; skip default erase to avoid flicker.
+        return 1;
+
     case WM_CLOSE:
         SaveGeometryFromHwnd(hwnd);
         DestroyWindow(hwnd);
         return 0;
 
     case WM_DESTROY:
-        KillTimer(hwnd, kTimerId);
         PostQuitMessage(0);
         return 0;
 
@@ -729,6 +889,11 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int showCmd) {
         return 1;
     }
     TryLoadIcons(instance);
+
+    if (!RegisterChildClasses(instance)) {
+        CleanupGlobals();
+        return 1;
+    }
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);

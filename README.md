@@ -1,6 +1,6 @@
 # CodingAgent
 
-Minimal desktop demo: a window titled **Hello World** with a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him, optional Desktop shortcuts with a custom icon, and **per-app window geometry persistence** (position and client size restored on the next launch).
+Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him; tab **two** is a placeholder page. Plus optional Desktop shortcuts with a custom icon, and **per-app window geometry persistence** (position and client size restored on the next launch).
 
 Implementations ship side by side:
 
@@ -67,7 +67,7 @@ macOS:
 ./hello_world_cpp
 ```
 
-`build_cpp_macos.sh` compiles `hello_world_macos.mm` with `clang++` and links AppKit/Cocoa. Keep `hello_world.icns` in the repo root (shortcut scripts can generate it from `hello_world.ico`) so the app can set its icon when launched outside a bundle.
+`build_cpp_macos.sh` compiles `hello_world_macos.mm` with `clang++` and links Cocoa/AppKit and QuartzCore. Keep `hello_world.icns` in the repo root (shortcut scripts can generate it from `hello_world.ico`) so the app can set its icon when launched outside a bundle.
 
 ## Project layout
 
@@ -174,6 +174,7 @@ On macOS, `python3 create_icon.py` writes `.ico`; the shortcut scripts also prod
 All apps aim to match:
 
 - Window title **Hello World**, dark canvas `#1a1a2e`, figure `#eaeaea`, hat `#c9a227`, ground `#2a2a44`
+- Two-tab layout with tab **one** selected at launch: tab **one** hosts the animation, tab **two** shows a centered **TAB TWO PLACEHOLDER** label on the same dark background (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL`, macOS `NSTabView`)
 - Default **client** size 400x200 and minimum **client** size 300x150 (Win32 converts client to outer size with `AdjustWindowRectEx`; macOS uses `contentRect` / `setContentMinSize` so chrome does not shrink the canvas vs Tk)
 - ~50 ms frame timer, shared walk-cycle math and scaling: hips swing +/-0.45 rad, knees flex one way only (near-straight stance leg, knee bent toward the walking direction during the forward swing), one body-bob per step sized so a planted straight leg's foot touches the fixed ground line, and line feet that lie flat on the ground through stance, point toes-up into heel strike, and lift heel-up/toes-down through push-off
 - Simple profile face (eye dot, nose wedge, mouth) facing the walking direction; the hat crown is filled with the background color so the head outline stays hidden inside the hat
@@ -181,9 +182,9 @@ All apps aim to match:
 - Bundled icon for the window and Desktop shortcuts (`.ico` on Windows, `.icns` on macOS)
 - Window geometry (position/size) is restored on launch and saved on close
 
-Windows C++ draws with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, face, hat, arms, legs, then the dog).
+Windows C++ draws the animation in a child window of the tab control (the placeholder is a second child window, shown/hidden on `TCN_SELCHANGE`) with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, face, hat, arms, legs, then the dog).
 
-macOS C++ draws with Core Graphics in an `NSView` (`drawRect:`), round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order.
+macOS C++ embeds the animation view as the first `NSTabView` item (a layer-backed placeholder with a centered label in the second) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order.
 
 ## Window geometry persistence
 
@@ -240,8 +241,8 @@ rm -f "$HOME/Library/Application Support/CodingAgent/hello_world_cpp_geometry.js
 ## Notes
 
 - Python runtime depends only on the standard library (`tkinter`, `json`).
-- Windows C++ runtime depends only on system Win32 libraries (`user32`, `gdi32`); geometry I/O uses simple C file + field scan (no extra JSON library).
-- macOS C++ runtime depends only on system Cocoa/AppKit; same minimal JSON read/write as Win32.
+- Windows C++ runtime depends only on system Win32 libraries (`user32`, `gdi32`, `comctl32` for the tab control); geometry I/O uses simple C file + field scan (no extra JSON library).
+- macOS C++ runtime depends only on system Cocoa/AppKit and QuartzCore; same minimal JSON read/write as Win32.
 - Prefer `pythonw` / the Windows subsystem `.exe` / macOS `.app` launchers for end-user launch so no console or Terminal flashes.
 - On macOS, `hello_world.py` exits with an error dialog if Tk is older than 8.6 (blank-canvas bug with Apple system Tk 8.5). Prefer Homebrew `python3` (`brew install python python-tk`).
 - Do not commit build outputs (`hello_world_cpp.exe`, `hello_world_cpp`, `*.obj`, `*.o`, `*.pdb`, `*.dSYM/`) or `__pycache__/`. Geometry JSON is stored per-user outside the repo.

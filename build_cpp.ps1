@@ -27,7 +27,7 @@ $bat = Join-Path $env:TEMP ("build_hello_world_{0}.bat" -f [guid]::NewGuid().ToS
 setlocal
 call "$vcvars" || exit /b 1
 cd /d "$RepoRoot" || exit /b 1
-cl /nologo /EHsc /std:c++17 /W4 /O2 /DUNICODE /D_UNICODE hello_world.cpp /Fe:hello_world_cpp.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib
+cl /nologo /EHsc /std:c++17 /W4 /O2 /DUNICODE /D_UNICODE hello_world.cpp /Fe:hello_world_cpp.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib comctl32.lib
 exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $bat -Encoding ASCII
 

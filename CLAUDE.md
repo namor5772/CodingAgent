@@ -15,8 +15,8 @@ Implementations:
 - **OS:** Windows and macOS (platform-specific build/shortcut scripts).
 - **Python:** 3.13+ preferred on PATH (`python` / `pythonw` on Windows, `python3` on macOS).
 - **Stdlib GUI:** `tkinter` (ships with the official Windows Python installer). On macOS, **do not use Apple `/usr/bin/python3`** — its Tk 8.5 paints a blank Canvas on modern macOS. Use Homebrew (`brew install python python-tk`, typically `/opt/homebrew/bin/python3` with Tk 8.6+) or a python.org build. `create_shortcut_macos.sh` picks a Tk 8.6+ interpreter; `hello_world.py` exits with an error dialog if launched under Tk older than 8.6 on Darwin.
-- **C++ build (Windows):** Visual Studio with MSVC x64 (`vswhere` + `vcvars64.bat`). Links `user32.lib` and `gdi32.lib` only.
-- **C++ build (macOS):** Xcode Command Line Tools (`clang++`), links `-framework Cocoa`. Source is Objective-C++ (`.mm`) with ARC.
+- **C++ build (Windows):** Visual Studio with MSVC x64 (`vswhere` + `vcvars64.bat`). Links `user32.lib`, `gdi32.lib`, and `comctl32.lib`.
+- **C++ build (macOS):** Xcode Command Line Tools (`clang++`), links `-framework Cocoa` and `-framework QuartzCore`. Source is Objective-C++ (`.mm`) with ARC.
 - **Icon generation only:** Pillow (`PIL`) — needed to run `create_icon.py`, not to run either app. macOS shortcuts also derive `hello_world.icns` from `hello_world.ico` via `sips` + `iconutil` when `.icns` is missing.
 
 ## Layout

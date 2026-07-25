@@ -2,6 +2,7 @@
 // hat walking across a dark window (title/colors/minsize/icon matched).
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
 #include <cmath>
@@ -604,9 +605,39 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
         [self.window center];
     }
 
+    NSTabView* tabView = [[NSTabView alloc] initWithFrame:contentRect];
+    tabView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+    NSTabViewItem* itemOne = [[NSTabViewItem alloc] initWithIdentifier:@"one"];
+    itemOne.label = @"one";
     self.walker = [[WalkerView alloc] initWithFrame:contentRect];
     self.walker.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    self.window.contentView = self.walker;
+    itemOne.view = self.walker;
+    [tabView addTabViewItem:itemOne];
+
+    NSTabViewItem* itemTwo = [[NSTabViewItem alloc] initWithIdentifier:@"two"];
+    itemTwo.label = @"two";
+    NSView* placeholder = [[NSView alloc] initWithFrame:contentRect];
+    placeholder.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    placeholder.wantsLayer = YES;
+    placeholder.layer.backgroundColor =
+        [[NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0] CGColor];
+
+    NSTextField* label = [[NSTextField alloc] initWithFrame:placeholder.bounds];
+    label.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    label.stringValue = @"TAB TWO PLACEHOLDER";
+    label.editable = NO;
+    label.bordered = NO;
+    label.backgroundColor = [NSColor clearColor];
+    label.textColor = [NSColor colorWithCalibratedRed:kFgR green:kFgG blue:kFgB alpha:1.0];
+    label.alignment = NSTextAlignmentCenter;
+    [label setFont:[NSFont systemFontOfSize:24]];
+    [placeholder addSubview:label];
+    itemTwo.view = placeholder;
+    [tabView addTabViewItem:itemTwo];
+
+    [tabView selectTabViewItem:itemOne];
+    self.window.contentView = tabView;
 
     [self tryLoadIcon];
 

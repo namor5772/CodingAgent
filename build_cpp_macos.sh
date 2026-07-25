@@ -20,6 +20,7 @@ fi
 
 clang++ -std=c++17 -fobjc-arc -O2 -Wall -Wextra \
   -framework Cocoa \
+  -framework QuartzCore \
   "$SRC" \
   -o "$OUT"
 

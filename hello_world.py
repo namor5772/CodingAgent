@@ -8,6 +8,7 @@ import os
 import sys
 import tkinter as tk
 from pathlib import Path
+from tkinter import ttk
 
 # Match prior chrome: dark bg, light strokes, default/min size.
 BG = "#1a1a2e"
@@ -213,8 +214,23 @@ class WalkerApp:
             except tk.TclError:
                 pass
 
-        self.canvas = tk.Canvas(self.root, bg=BG, highlightthickness=0, bd=0)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill=tk.BOTH)
+
+        tab_one = tk.Frame(self.notebook, bg=BG)
+        self.canvas = tk.Canvas(tab_one, bg=BG, highlightthickness=0, bd=0)
         self.canvas.pack(expand=True, fill=tk.BOTH)
+        self.notebook.add(tab_one, text="one")
+
+        tab_two = tk.Frame(self.notebook, bg=BG)
+        placeholder = tk.Label(
+            tab_two,
+            text="TAB TWO PLACEHOLDER",
+            bg=BG,
+            fg=FG,
+        )
+        placeholder.pack(expand=True, fill=tk.BOTH)
+        self.notebook.add(tab_two, text="two")
 
         self.phase = 0.0
         self.x = 40.0
