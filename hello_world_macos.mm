@@ -739,7 +739,22 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
     if (_chase.phase >= 1.0) {
         _chase.phase -= 1.0;
     }
-    const double speed = kChaseSpeed * std::max(static_cast<double>(w) / 400.0, 0.75);
+    // Two-stage speed-up: past half the way from the spawn point (-60) to
+    // the perched bird the dog breaks into a real chase, 60% faster; then,
+    // with its nose 60*scale from the bird (just before takeoff), a final
+    // lunge adds another 30%. Both boosts persist to the end of the lap --
+    // the bird's escape below is derived from `speed`, so it flies away
+    // faster too -- and clear themselves when the dog respawns at -60.
+    const double halfwayX = (-60.0 + w * 0.62) / 2.0;
+    const double lungeX = w * 0.62 - 91.0 * scale;  // nose (dogX + 31*scale) 60*scale out
+    double boost = 1.0;
+    if (_chase.dogX >= halfwayX) {
+        boost *= 1.6;
+    }
+    if (_chase.dogX >= lungeX) {
+        boost *= 1.3;
+    }
+    const double speed = kChaseSpeed * std::max(static_cast<double>(w) / 400.0, 0.75) * boost;
     _chase.dogX += speed;
     const double dogNoseX = _chase.dogX + 31.0 * scale;
 
@@ -753,13 +768,10 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
         }
     } else {
         _chase.flap += 0.35;
-        // Climb to cruise height, just above the dog's reach. alt is in
-        // px, so clamp it too in case the window shrank mid-flight.
-        const double cruise = 52.0 * scale;
-        _chase.alt = std::min(_chase.alt, cruise);
-        if (_chase.alt < cruise) {
-            _chase.alt = std::min(cruise, _chase.alt + 1.4 * scale);
-        }
+        // Climb away at ~45 deg: rise per frame matches the horizontal
+        // speed, so the bird keeps gaining height after takeoff instead of
+        // leveling off at a cruise height.
+        _chase.alt += speed + 0.2 * scale;
         // Fly on just ahead of the dog (barely pulling away).
         _chase.flyX += speed + 0.2 * scale;
         // Both off the right edge: restart the chase from the left.

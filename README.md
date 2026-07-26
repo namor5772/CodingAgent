@@ -1,6 +1,6 @@
 # CodingAgent
 
-Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him; tab **two** plays a looping chase scene — the dog runs in from the left after a bird standing on the ground, the bird takes off just before the dog reaches it and flies on just ahead of it, restarting once both leave the right edge (Python + Win32 C++; the macOS app still shows a placeholder). Plus optional Desktop shortcuts with a custom icon, and **per-app window state persistence** (position, client size, and selected tab restored on the next launch).
+Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure in a top hat walking across the window, a stick-figure dog trotting along behind him; tab **two** plays a looping chase scene — the dog runs in from the left after a bird standing on the ground, the bird takes off just before the dog reaches it — the dog speeding up in two stages (1.6x halfway to the bird, a further 1.3x lunge just before takeoff) — and climbs away at a 45-degree angle, fleeing just ahead of the dog until the loop restarts. Plus optional Desktop shortcuts with a custom icon, and **per-app window state persistence** (position, client size, and selected tab restored on the next launch).
 
 Implementations ship side by side:
 
@@ -75,7 +75,7 @@ macOS:
 |------|------|
 | `hello_world.py` | Python/Tk app — tab one: stick figure with hat walking; tab two: dog-chases-bird |
 | `hello_world.cpp` | Native Win32 clone of the same two animations |
-| `hello_world_macos.mm` | Native macOS Cocoa clone of the tab one animation (tab two still the placeholder) |
+| `hello_world_macos.mm` | Native macOS Cocoa clone of the same two animations |
 | `build_cpp.ps1` | Builds `hello_world_cpp.exe` with MSVC x64 |
 | `build_cpp_macos.sh` | Builds `hello_world_cpp` with clang++ / Cocoa |
 | `hello_world.ico` | Multi-size app icon (Windows title bar / taskbar and shortcut) |
@@ -174,18 +174,18 @@ On macOS, `python3 create_icon.py` writes `.ico`; the shortcut scripts also prod
 All apps aim to match:
 
 - Window title **Hello World**, dark canvas `#1a1a2e`, figure `#eaeaea`, hat `#c9a227`, ground `#2a2a44`
-- Two-tab layout: tab **one** hosts the walker animation, tab **two** hosts the dog-chases-bird chase scene — still the old centered **TAB TWO PLACEHOLDER** label in the macOS app until that port lands (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL`, macOS `NSTabView`); the selected tab is persisted and restored on the next launch (tab **one** on first run)
+- Two-tab layout: tab **one** hosts the walker animation, tab **two** hosts the dog-chases-bird chase scene (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL`, macOS `NSTabView`); the selected tab is persisted and restored on the next launch (tab **one** on first run)
 - Default **client** size 400x200 and minimum **client** size 300x150 (Win32 converts client to outer size with `AdjustWindowRectEx`; macOS uses `contentRect` / `setContentMinSize` so chrome does not shrink the canvas vs Tk)
 - ~50 ms frame timer, shared walk-cycle math and scaling: hips swing +/-0.45 rad, knees flex one way only (near-straight stance leg, knee bent toward the walking direction during the forward swing), one body-bob per step sized so a planted straight leg's foot touches the fixed ground line, and line feet that lie flat on the ground through stance, point toes-up into heel strike, and lift heel-up/toes-down through push-off
 - Simple profile face (eye dot, nose wedge, mouth) facing the walking direction; the hat crown is filled with the background color so the head outline stays hidden inside the hat
 - Stick-figure dog trotting ~65 px (scaled) behind the walker: diagonal leg pairs (trot) with the same one-way lower-leg folds, wagging tail, pointed ear, muzzle and eye dot; the walk wraps around only after the dog has also cleared the right edge
-- Tab **two** chase scene (Python + Win32): the same stick-figure dog at a faster cadence charges a bird perched on the same-height ground line; the bird takes off just before the dog's nose reaches it, climbs just above the dog's reach, and flaps on slightly faster than the dog so it stays just ahead, body bobbing with the wingbeat; the loop restarts once both leave the right edge
+- Tab **two** chase scene (all three apps): the same stick-figure dog at a faster cadence charges a bird perched on the same-height ground line, speeding up in two stages — 1.6x once halfway from its spawn point to the bird, plus a further 1.3x lunge (2.08x total) once its nose closes to 60 px (scaled), just before the bird takes off; the bird flees at the dog's speed plus a small margin and climbs away at ~45 degrees with no cruise level, exiting the top of the scene while staying just ahead, body bobbing with the wingbeat; the loop restarts once both leave the right edge
 - Bundled icon for the window and Desktop shortcuts (`.ico` on Windows, `.icns` on macOS)
 - Window geometry (position/size) and the selected tab are restored on launch and saved on close
 
 Windows C++ draws each animation in a child window of the tab control (the chase scene is a second child window with its own frame timer, shown/hidden on `TCN_SELCHANGE`) with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, face, hat, arms, legs, then the dog).
 
-macOS C++ embeds the animation view as the first `NSTabView` item (a layer-backed placeholder with a centered label in the second) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order. The window forces the dark-aqua appearance regardless of the system setting — under light aqua the unselected tab label draws dark-on-dark over the canvas and becomes unreadable.
+macOS C++ embeds each animation as its own layer-backed `NSView` in the two `NSTabView` items (walker in tab one, chase scene in tab two) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order. The window forces the dark-aqua appearance regardless of the system setting — under light aqua the unselected tab label draws dark-on-dark over the canvas and becomes unreadable.
 
 ## Window state persistence
 

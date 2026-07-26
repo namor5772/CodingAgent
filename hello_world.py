@@ -564,7 +564,20 @@ class WalkerApp:
         scale = view_scale(w, h)
 
         self.chase_phase = (self.chase_phase + 0.065) % 1.0
-        speed = CHASE_SPEED * max(w / 400.0, 0.75)
+        # Two-stage speed-up: past half the way from the spawn point (-60) to
+        # the perched bird the dog breaks into a real chase, 60% faster; then,
+        # with its nose 60*scale from the bird (just before takeoff), a final
+        # lunge adds another 30%. Both boosts persist to the end of the lap --
+        # the bird's escape below is derived from `speed`, so it flies away
+        # faster too -- and clear themselves when the dog respawns at -60.
+        halfway_x = (-60.0 + w * 0.62) / 2
+        lunge_x = w * 0.62 - 91.0 * scale  # nose (dog_x + 31*scale) 60*scale out
+        boost = 1.0
+        if self.chase_dog_x >= halfway_x:
+            boost *= 1.6
+        if self.chase_dog_x >= lunge_x:
+            boost *= 1.3
+        speed = CHASE_SPEED * max(w / 400.0, 0.75) * boost
         self.chase_dog_x += speed
         dog_nose_x = self.chase_dog_x + 31 * scale
 
@@ -577,12 +590,10 @@ class WalkerApp:
                 self.bird_alt = 0.0
         else:
             self.bird_flap += 0.35
-            # Climb to cruise height, just above the dog's reach. alt is in
-            # px, so clamp it too in case the window shrank mid-flight.
-            cruise = 52 * scale
-            self.bird_alt = min(self.bird_alt, cruise)
-            if self.bird_alt < cruise:
-                self.bird_alt = min(cruise, self.bird_alt + 1.4 * scale)
+            # Climb away at ~45 deg: rise per frame matches the horizontal
+            # speed, so the bird keeps gaining height after takeoff instead of
+            # leveling off at a cruise height.
+            self.bird_alt += speed + 0.2 * scale
             # Fly on just ahead of the dog (barely pulling away).
             self.bird_fly_x += speed + 0.2 * scale
             # Both off the right edge: restart the chase from the left.
