@@ -1,4 +1,8 @@
-"""Minimal Tkinter app: stick figure with a hat walking across the window."""
+"""Minimal Tkinter app: stick figure with a hat walking across the window.
+
+Tab one: the walker and his trotting dog. Tab two: a dog chasing a bird —
+the bird takes off just before the dog reaches it and flies on just ahead.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ FG = "#eaeaea"
 HAT = "#c9a227"  # muted gold brim/crown accent
 FRAME_MS = 50
 WALK_SPEED = 2.4  # px per frame at default scale baseline
+CHASE_SPEED = 3.2  # px per frame at default scale baseline (tab two dog)
 DEFAULT_WIDTH = 400
 DEFAULT_HEIGHT = 200
 MIN_WIDTH = 300
@@ -236,13 +241,8 @@ class WalkerApp:
         self.notebook.add(tab_one, text="one")
 
         tab_two = tk.Frame(self.notebook, bg=BG)
-        placeholder = tk.Label(
-            tab_two,
-            text="TAB TWO PLACEHOLDER",
-            bg=BG,
-            fg=FG,
-        )
-        placeholder.pack(expand=True, fill=tk.BOTH)
+        self.canvas_two = tk.Canvas(tab_two, bg=BG, highlightthickness=0, bd=0)
+        self.canvas_two.pack(expand=True, fill=tk.BOTH)
         self.notebook.add(tab_two, text="two")
 
         if saved is not None and saved.get("tab") == 1:
@@ -250,6 +250,14 @@ class WalkerApp:
 
         self.phase = 0.0
         self.x = 40.0
+        # Tab two chase scene: the dog runs in from the left; the bird waits
+        # on the ground, then takes off just before the dog reaches it.
+        self.chase_phase = 0.0
+        self.chase_dog_x = -60.0
+        self.bird_flying = False
+        self.bird_fly_x = 0.0
+        self.bird_alt = 0.0  # px climbed since takeoff (0 = perched)
+        self.bird_flap = 0.0
         self._after_id: str | None = None
         self._geometry_checked = False
         self.root.bind("<Configure>", self._on_configure)
@@ -258,6 +266,7 @@ class WalkerApp:
     def _on_configure(self, _event: tk.Event | None = None) -> None:
         # Redraw immediately on resize so the figure stays centered vertically.
         self._draw()
+        self._draw_chase()
         # First real map/resize: if restored coords are off-screen, re-center defaults.
         if not self._geometry_checked:
             try:
@@ -328,6 +337,7 @@ class WalkerApp:
         if self.x > w + 40 + 90 * view_scale(w, h):
             self.x = -40.0
         self._draw()
+        self._tick_chase()
         self._after_id = self.root.after(FRAME_MS, self._tick)
 
     def _draw(self) -> None:
@@ -461,14 +471,25 @@ class WalkerApp:
             c.create_line(kx, ky, fx, fy, fill=FG, width=stroke, capstyle=tk.ROUND)
             c.create_line(fx, fy, tx_, ty_, fill=FG, width=stroke, capstyle=tk.ROUND)
 
-        # Dog trotting behind the walker, on the same ground line; drawn one
-        # stroke thinner so it reads as the smaller figure.
-        dpose = dog_pose(self.phase)
-        dog_w = max(1, stroke - 1)
+        # Dog trotting behind the walker, on the same ground line.
+        self._draw_dog(c, cx - 65 * scale, ground_y, scale, dog_pose(self.phase))
+
+    def _draw_dog(
+        self,
+        c: tk.Canvas,
+        dog_cx: float,
+        ground_y: float,
+        scale: float,
+        dpose: dict[str, float],
+    ) -> None:
+        """Stick-figure dog with its spine on the ground line (shared by both tabs).
+
+        Drawn one stroke thinner than the walker so it reads as the smaller figure.
+        """
+        dog_w = max(1, max(2, int(round(3 * scale))) - 1)
         d_upper = 10 * scale
         d_lower = 9 * scale
         half_body = 14 * scale
-        dog_cx = cx - 65 * scale
         spine_y = ground_y - 19 * scale + dpose["bob"] * scale
         shoulder_x = dog_cx + half_body
         hip_x = dog_cx - half_body
@@ -531,6 +552,104 @@ class WalkerApp:
             dh_y - 1.2 * scale - der,
             dh_x + 1.8 * scale + der,
             dh_y - 1.2 * scale + der,
+            fill=FG,
+            outline=FG,
+        )
+
+    def _tick_chase(self) -> None:
+        """Advance the tab two chase: the dog runs right; the bird flees just ahead."""
+        c = self.canvas_two
+        w = max(c.winfo_width(), 1)
+        h = max(c.winfo_height(), 1)
+        scale = view_scale(w, h)
+
+        self.chase_phase = (self.chase_phase + 0.065) % 1.0
+        speed = CHASE_SPEED * max(w / 400.0, 0.75)
+        self.chase_dog_x += speed
+        dog_nose_x = self.chase_dog_x + 31 * scale
+
+        if not self.bird_flying:
+            # Perched bird waits at a fixed spot; it takes off just before the
+            # dog's nose reaches it.
+            if w * 0.62 - dog_nose_x < 30 * scale:
+                self.bird_flying = True
+                self.bird_fly_x = w * 0.62
+                self.bird_alt = 0.0
+        else:
+            self.bird_flap += 0.35
+            # Climb to cruise height, just above the dog's reach. alt is in
+            # px, so clamp it too in case the window shrank mid-flight.
+            cruise = 52 * scale
+            self.bird_alt = min(self.bird_alt, cruise)
+            if self.bird_alt < cruise:
+                self.bird_alt = min(cruise, self.bird_alt + 1.4 * scale)
+            # Fly on just ahead of the dog (barely pulling away).
+            self.bird_fly_x += speed + 0.2 * scale
+            # Both off the right edge: restart the chase from the left.
+            if self.bird_fly_x > w + 30 and self.chase_dog_x - 26 * scale > w:
+                self.chase_dog_x = -60.0
+                self.bird_flying = False
+                self.bird_alt = 0.0
+                self.bird_flap = 0.0
+        self._draw_chase()
+
+    def _draw_chase(self) -> None:
+        c = self.canvas_two
+        c.delete("all")
+        w = max(c.winfo_width(), 1)
+        h = max(c.winfo_height(), 1)
+        scale = view_scale(w, h)
+        stroke = max(2, int(round(3 * scale)))
+        bird_w = max(1, stroke - 1)
+
+        # Same ground height as tab one (h*0.55 body anchor + 34+22+20 leg reach).
+        ground_y = h * 0.55 + 76.0 * scale
+        c.create_line(0, ground_y, w, ground_y, fill="#2a2a44", width=max(1, stroke - 1))
+
+        # Chasing dog: same figure as tab one's trot, driven by the chase phase.
+        self._draw_dog(c, self.chase_dog_x, ground_y, scale, dog_pose(self.chase_phase))
+
+        # Bird: perched on the ground until takeoff, then flapping just above
+        # the dog, body bobbing with the wingbeat.
+        if self.bird_flying:
+            bx = self.bird_fly_x
+            by = ground_y - 5 * scale - self.bird_alt + 1.5 * scale * math.sin(self.bird_flap)
+        else:
+            bx = w * 0.62
+            by = ground_y - 5 * scale
+
+        # Tail fanning from the rear of the body.
+        c.create_line(bx - 5 * scale, by, bx - 9.5 * scale, by - 2.5 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+        c.create_line(bx - 5 * scale, by, bx - 9 * scale, by + 1.5 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+        # Body
+        c.create_line(bx - 5 * scale, by, bx + 5.5 * scale, by, fill=FG, width=bird_w, capstyle=tk.ROUND)
+
+        wing_x, wing_y = bx + 1.0 * scale, by - 0.5 * scale
+        if self.bird_flying:
+            # Two wings flapping out of phase (far wing slightly shorter).
+            for phase_off, wing_len in ((0.0, 9.0), (0.9, 7.5)):
+                ang = 2.36 - 1.1 * math.sin(self.bird_flap + phase_off)
+                wx, wy = limb_end(wing_x, wing_y, ang, wing_len * scale)
+                c.create_line(wing_x, wing_y, wx, wy, fill=FG, width=bird_w, capstyle=tk.ROUND)
+            # Tucked feet trailing under the body.
+            c.create_line(bx + 0.5 * scale, by + 0.5 * scale, bx + 2.5 * scale, by + 3 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+        else:
+            # Folded wing along the body; two legs down to the ground.
+            c.create_line(wing_x, wing_y, bx - 6.5 * scale, by - 2 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+            c.create_line(bx - 1 * scale, by, bx - 2 * scale, ground_y, fill=FG, width=bird_w, capstyle=tk.ROUND)
+            c.create_line(bx + 2.5 * scale, by, bx + 2.5 * scale, ground_y, fill=FG, width=bird_w, capstyle=tk.ROUND)
+
+        # Head, beak, eye.
+        hx, hy, hr = bx + 8 * scale, by - 2.5 * scale, 3 * scale
+        c.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=FG, width=bird_w)
+        c.create_line(hx + 2.4 * scale, hy - 1.1 * scale, hx + 5.6 * scale, hy + 0.2 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+        c.create_line(hx + 2.4 * scale, hy + 1.1 * scale, hx + 5.6 * scale, hy + 0.2 * scale, fill=FG, width=bird_w, capstyle=tk.ROUND)
+        ber = max(0.8, 0.7 * scale)
+        c.create_oval(
+            hx + 0.8 * scale - ber,
+            hy - 0.8 * scale - ber,
+            hx + 0.8 * scale + ber,
+            hy - 0.8 * scale + ber,
             fill=FG,
             outline=FG,
         )

@@ -2,7 +2,7 @@
 
 ## What this is
 
-Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure with a top hat and a simple profile face (eye, nose, mouth) walking naturally across a dark canvas, followed by a stick-figure dog trotting behind him; tab **two** is a placeholder page. Plus Desktop shortcuts with a custom icon.
+Minimal desktop demo: a window titled **Hello World** with a two-tab layout. Tab **one** plays a short looping animation of a stick figure with a top hat and a simple profile face (eye, nose, mouth) walking naturally across a dark canvas, followed by a stick-figure dog trotting behind him; tab **two** plays a looping chase scene — a stick-figure dog runs in from the left after a bird standing on the ground, the bird takes off just before the dog reaches it and flies on just ahead of the dog, all left to right, restarting once both leave the right edge (Python + Win32 C++; the macOS app still shows the old placeholder). Plus Desktop shortcuts with a custom icon.
 
 Implementations:
 
@@ -15,7 +15,7 @@ Implementations:
 - **OS:** Windows and macOS (platform-specific build/shortcut scripts).
 - **Python:** 3.13+ preferred on PATH (`python` / `pythonw` on Windows, `python3` on macOS).
 - **Stdlib GUI:** `tkinter` (ships with the official Windows Python installer). On macOS, **do not use Apple `/usr/bin/python3`** — its Tk 8.5 paints a blank Canvas on modern macOS. Use Homebrew (`brew install python python-tk`, typically `/opt/homebrew/bin/python3` with Tk 8.6+) or a python.org build. `create_shortcut_macos.sh` picks a Tk 8.6+ interpreter; `hello_world.py` exits with an error dialog if launched under Tk older than 8.6 on Darwin.
-- **C++ build (Windows):** Visual Studio with MSVC x64 (`vswhere` + `vcvars64.bat`). Links `user32.lib`, `gdi32.lib`, and `comctl32.lib`.
+- **C++ build (Windows):** Visual Studio with MSVC x64 (`vswhere` + `vcvars64.bat`). Links `user32.lib`, `gdi32.lib`, and `comctl32.lib`. Builds can take 5-10 min on this machine (cl.exe is slow here); if a build times out, just re-run `build_cpp.ps1` — it is not a failure signal.
 - **C++ build (macOS):** Xcode Command Line Tools (`clang++`), links `-framework Cocoa` and `-framework QuartzCore`. Source is Objective-C++ (`.mm`) with ARC.
 - **Icon generation only:** Pillow (`PIL`) — needed to run `create_icon.py`, not to run either app. macOS shortcuts also derive `hello_world.icns` from `hello_world.ico` via `sips` + `iconutil` when `.icns` is missing.
 
@@ -23,9 +23,9 @@ Implementations:
 
 | Path | Role |
 |------|------|
-| `hello_world.py` | Python app — stick figure with hat + trotting dog on a Tk Canvas. |
-| `hello_world.cpp` | Win32 C++ clone of the same animation (title, colors, minsize, icon). |
-| `hello_world_macos.mm` | macOS Cocoa/AppKit C++ clone of the same animation. |
+| `hello_world.py` | Python app — tab one: stick figure with hat + trotting dog; tab two: dog-chases-bird; Tk Canvases. |
+| `hello_world.cpp` | Win32 C++ clone of the same two animations (title, colors, minsize, icon). |
+| `hello_world_macos.mm` | macOS Cocoa/AppKit C++ clone of the tab one animation (tab two still the placeholder). |
 | `build_cpp.ps1` | MSVC build script producing `hello_world_cpp.exe` (WINDOWS subsystem). |
 | `build_cpp_macos.sh` | clang++ build script producing `hello_world_cpp` (Cocoa). |
 | `hello_world_cpp.exe` | Windows build output (gitignored). Run from repo root so `hello_world.ico` resolves. |
@@ -122,10 +122,11 @@ macOS "shortcuts" are minimal `.app` bundles (shell launcher in `Contents/MacOS`
 ## Conventions
 
 - Prefer **stdlib** / system libs for app runtime; optional tools (Pillow, PowerShell COM, MSVC, sips/iconutil) only for asset/shortcut/build setup.
-- UI baseline is the **two-tab layout** in all three apps: tab **one** hosts the animation, tab **two** shows a centered `TAB TWO PLACEHOLDER` label on the dark background (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL` with child windows toggled on `TCN_SELCHANGE`, macOS `NSTabView`). Keep tab structure and labels in parity across implementations.
+- UI baseline is the **two-tab layout** in all three apps: tab **one** hosts the walker animation, tab **two** hosts the dog-chases-bird animation — still the old centered `TAB TWO PLACEHOLDER` label in the macOS app until that port lands (Tk `ttk.Notebook`, Win32 `WC_TABCONTROL` with child windows toggled on `TCN_SELCHANGE`, macOS `NSTabView`). Keep tab structure and labels in parity across implementations.
 - Match the Python UI when changing either C++ clone (title, two-tab layout, walk cycle math, profile face, hat crown filled with the background color so the head is hidden inside it, colors `#1a1a2e` / `#eaeaea` / hat `#c9a227`, ground `#2a2a44`, 400x200 default, 300x150 min, bundled icon, ~50 ms frame timer).
 - Walk-cycle invariants (all three apps): hips swing `0.45*sin(t)` with legs 180 deg apart; knee flexion is one-signed (`max(0, cos(t + 0.6))`) and the shin is drawn at `hip_angle - knee` so knees only fold backward (knee vertex points in the walking direction); bob is `4.2*|sin(t)|` (one bounce per step) and the ground line is anchored to the un-bobbed pose at straight-leg reach so planted feet touch it. Feet are `8*scale` lines from the ankle at the absolute (ground-anchored, not shin-relative) angle `pi/2 + 0.4*max(0, sin t) - 0.8*knee*max(0, -sin t)` per leg: `pi/2` = flat pointing forward, toes-up into heel strike, flat through stance, heel-up/toes-down through toe-off into early swing.
 - Dog invariants (all three apps): trots `65*scale` behind the man on the same ground line, drawn one stroke thinner; diagonal leg pairs `0.60*sin` at the walker's cadence with phase offset `+1.9`, one-signed folds `0.9*max(0, cos(t + 0.6))` drawn as `angle - fold`, spine bob `3.3*|sin(t)|` (= `19*(1 - cos 0.6)`, paws stay planted), tail wag `0.25*sin(2t)` about base angle `pi + 0.55`; the walker's x wraps at `w + 40 + 90*scale` (dog fully off-screen) and respawns at `-40`.
+- Chase-scene invariants (tab two; Python + Win32 so far, macOS pending): the dog is the same figure as tab one (`dog_pose`/`DogTrotPose` shared via `_draw_dog`/`DrawDog`) driven by a chase phase (+0.065/frame) at `CHASE_SPEED` 3.2 px/frame (400px baseline, same width scaling); ground line at the same height as tab one (`h*0.55 + 76*scale`); bird perched at `w*0.62` on the ground until the dog nose (`dog_cx + 31*scale`) closes within `30*scale`, then climbs `1.4*scale`/frame to a `52*scale` cruise (just above the dog's reach) and flies at `speed + 0.2*scale` so it stays just ahead; wings flap as two `limb_end` strokes at `2.36 - 1.1*sin(flap)` (far wing +0.9 rad phase, shorter), flap +0.35/frame; cycle resets when the bird passes `w + 30` and the dog's tail clears the right edge — dog respawns at `-60`, bird perched again.
 - Window geometry persistence is **per app**: Python -> `hello_world_geometry.json`, C++ -> `hello_world_cpp_geometry.json` in the same per-user CodingAgent config dir (`%LOCALAPPDATA%` / `~/Library/Application Support` / XDG). Do not share one file across implementations. The same JSON also persists the selected tab as `"tab": 0|1` (0 = one, 1 = two) — optional on load (older files without it default to tab one; any value other than 1 means 0), restored at startup, and written together with geometry on close/quit.
 - Use `pythonw` / WINDOWS subsystem / macOS `.app` launchers for end-user launch so no console/Terminal flashes.
 - PowerShell scripts: stick to **ASCII** in string literals (encoding/code-page issues with em dashes etc.). Shell scripts: ASCII preferred in generated plists/launchers.

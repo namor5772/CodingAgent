@@ -1,5 +1,6 @@
-// Win32 clone of hello_world.py — stick figure with a hat walking
-// across a dark window (title/colors/minsize/icon matched).
+// Win32 clone of hello_world.py — tab one: stick figure with a hat walking
+// across a dark window; tab two: a dog chasing a bird that takes off just
+// before being caught (title/colors/minsize/icon matched).
 
 #ifndef UNICODE
 #define UNICODE
@@ -54,16 +55,26 @@ HICON g_iconSmall = nullptr;
 
 HWND g_hwndTab = nullptr;
 HWND g_hwndAnim = nullptr;
-HWND g_hwndPlaceholder = nullptr;
+HWND g_hwndChase = nullptr;
 
 // Tab restored from the geometry JSON; applied when the tab control is created.
 int g_initialTab = 0;
 
 const wchar_t kAnimClass[] = L"CodingAgentHelloWorldAnimation";
-const wchar_t kPlaceholderClass[] = L"CodingAgentHelloWorldPlaceholder";
+const wchar_t kChaseClass[] = L"CodingAgentHelloWorldChase";
 
 double g_phase = 0.0;
 double g_x = 40.0;
+
+// Tab two chase scene state: the dog runs in from the left; the bird waits
+// on the ground, then takes off just before the dog reaches it.
+constexpr double kChaseSpeed = 3.2;
+double g_chasePhase = 0.0;
+double g_chaseDogX = -60.0;
+bool g_birdFlying = false;
+double g_birdFlyX = 0.0;
+double g_birdAlt = 0.0;  // px climbed since takeoff (0 = perched)
+double g_birdFlap = 0.0;
 
 struct Pose {
     double leg_l;
@@ -388,6 +399,92 @@ void LineTo2(HDC hdc, int x1, int y1, int x2, int y2) {
     LineTo(hdc, x2, y2);
 }
 
+void DrawDog(HDC hdc, double dog_cx, double ground_y, double scale, const DogPose& dpose) {
+    // Stick-figure dog with its spine on the ground line (shared by both
+    // tabs); drawn one stroke thinner than the walker so it reads as the
+    // smaller figure.
+    const double kPi = 3.14159265358979323846;
+    const int stroke = (std::max)(2, static_cast<int>(std::lround(3.0 * scale)));
+    const int dog_w = (std::max)(1, stroke - 1);
+    const double d_upper = 10.0 * scale;
+    const double d_lower = 9.0 * scale;
+    const double half_body = 14.0 * scale;
+    const double spine_y = ground_y - 19.0 * scale + dpose.bob * scale;
+    const double shoulder_x = dog_cx + half_body;
+    const double hip_x = dog_cx - half_body;
+
+    HPEN dogPen = MakePen(kFgColor, dog_w);
+    HGDIOBJ oldPen = SelectObject(hdc, dogPen);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+    // Spine
+    LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
+            static_cast<int>(std::lround(spine_y)),
+            static_cast<int>(std::lround(shoulder_x)),
+            static_cast<int>(std::lround(spine_y)));
+
+    // Legs: both legs of a diagonal pair share angle/fold; front pair
+    // hangs from the shoulder, rear pair from the hip.
+    const double attach[4] = {shoulder_x, shoulder_x, hip_x, hip_x};
+    const double dAng[4] = {dpose.pair_a, dpose.pair_b, dpose.pair_b, dpose.pair_a};
+    const double dFold[4] = {dpose.fold_a, dpose.fold_b, dpose.fold_b, dpose.fold_a};
+    for (int i = 0; i < 4; ++i) {
+        double kx = 0, ky = 0, px = 0, py = 0;
+        LimbEnd(attach[i], spine_y, dAng[i], d_upper, &kx, &ky);
+        LimbEnd(kx, ky, dAng[i] - dFold[i], d_lower, &px, &py);
+        LineTo2(hdc, static_cast<int>(std::lround(attach[i])),
+                static_cast<int>(std::lround(spine_y)),
+                static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)));
+        LineTo2(hdc, static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)),
+                static_cast<int>(std::lround(px)), static_cast<int>(std::lround(py)));
+    }
+
+    // Tail: up-backward from the hip, wagging about its base angle.
+    double tx = 0, ty = 0;
+    LimbEnd(hip_x, spine_y, kPi + 0.55 + dpose.tail, 12.0 * scale, &tx, &ty);
+    LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
+            static_cast<int>(std::lround(spine_y)),
+            static_cast<int>(std::lround(tx)), static_cast<int>(std::lround(ty)));
+
+    // Neck (stops at the head outline), head, muzzle, ear.
+    LineTo2(hdc, static_cast<int>(std::lround(shoulder_x)),
+            static_cast<int>(std::lround(spine_y)),
+            static_cast<int>(std::lround(shoulder_x + 4.1 * scale)),
+            static_cast<int>(std::lround(spine_y - 5.9 * scale)));
+    const double dh_x = shoulder_x + 7.0 * scale;
+    const double dh_y = spine_y - 10.0 * scale;
+    const double dh_r = 5.0 * scale;
+    Ellipse(hdc,
+            static_cast<int>(std::lround(dh_x - dh_r)),
+            static_cast<int>(std::lround(dh_y - dh_r)),
+            static_cast<int>(std::lround(dh_x + dh_r)),
+            static_cast<int>(std::lround(dh_y + dh_r)));
+    LineTo2(hdc, static_cast<int>(std::lround(dh_x + 3.5 * scale)),
+            static_cast<int>(std::lround(dh_y + 0.8 * scale)),
+            static_cast<int>(std::lround(dh_x + 10.0 * scale)),
+            static_cast<int>(std::lround(dh_y + 2.2 * scale)));
+    LineTo2(hdc, static_cast<int>(std::lround(dh_x - 1.5 * scale)),
+            static_cast<int>(std::lround(dh_y - 4.0 * scale)),
+            static_cast<int>(std::lround(dh_x - 4.0 * scale)),
+            static_cast<int>(std::lround(dh_y - 9.5 * scale)));
+
+    // Eye: filled dot.
+    HBRUSH dogEyeBrush = CreateSolidBrush(kFgColor);
+    HGDIOBJ prevBrush = SelectObject(hdc, dogEyeBrush);
+    const double der = (std::max)(1.0, 0.9 * scale);
+    Ellipse(hdc,
+            static_cast<int>(std::lround(dh_x + 1.8 * scale - der)),
+            static_cast<int>(std::lround(dh_y - 1.2 * scale - der)),
+            static_cast<int>(std::lround(dh_x + 1.8 * scale + der)),
+            static_cast<int>(std::lround(dh_y - 1.2 * scale + der)));
+    SelectObject(hdc, prevBrush);
+    DeleteObject(dogEyeBrush);
+
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(dogPen);
+}
+
 void DrawWalker(HWND hwnd, HDC hdc) {
     RECT client = {};
     GetClientRect(hwnd, &client);
@@ -547,91 +644,8 @@ void DrawWalker(HWND hwnd, HDC hdc) {
     SelectObject(hdc, oldPen);
     DeleteObject(fgPen);
 
-    // Dog trotting behind the walker, on the same ground line; drawn one
-    // stroke thinner so it reads as the smaller figure.
-    {
-        const double kPi = 3.14159265358979323846;
-        const DogPose dpose = DogTrotPose(g_phase);
-        const int dog_w = (std::max)(1, stroke - 1);
-        const double d_upper = 10.0 * scale;
-        const double d_lower = 9.0 * scale;
-        const double half_body = 14.0 * scale;
-        const double dog_cx = cx - 65.0 * scale;
-        const double spine_y = ground_y - 19.0 * scale + dpose.bob * scale;
-        const double shoulder_x = dog_cx + half_body;
-        const double hip_x = dog_cx - half_body;
-
-        HPEN dogPen = MakePen(kFgColor, dog_w);
-        oldPen = SelectObject(hdc, dogPen);
-        oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-
-        // Spine
-        LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
-                static_cast<int>(std::lround(spine_y)),
-                static_cast<int>(std::lround(shoulder_x)),
-                static_cast<int>(std::lround(spine_y)));
-
-        // Legs: both legs of a diagonal pair share angle/fold; front pair
-        // hangs from the shoulder, rear pair from the hip.
-        const double attach[4] = {shoulder_x, shoulder_x, hip_x, hip_x};
-        const double dAng[4] = {dpose.pair_a, dpose.pair_b, dpose.pair_b, dpose.pair_a};
-        const double dFold[4] = {dpose.fold_a, dpose.fold_b, dpose.fold_b, dpose.fold_a};
-        for (int i = 0; i < 4; ++i) {
-            double kx = 0, ky = 0, px = 0, py = 0;
-            LimbEnd(attach[i], spine_y, dAng[i], d_upper, &kx, &ky);
-            LimbEnd(kx, ky, dAng[i] - dFold[i], d_lower, &px, &py);
-            LineTo2(hdc, static_cast<int>(std::lround(attach[i])),
-                    static_cast<int>(std::lround(spine_y)),
-                    static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)));
-            LineTo2(hdc, static_cast<int>(std::lround(kx)), static_cast<int>(std::lround(ky)),
-                    static_cast<int>(std::lround(px)), static_cast<int>(std::lround(py)));
-        }
-
-        // Tail: up-backward from the hip, wagging about its base angle.
-        double tx = 0, ty = 0;
-        LimbEnd(hip_x, spine_y, kPi + 0.55 + dpose.tail, 12.0 * scale, &tx, &ty);
-        LineTo2(hdc, static_cast<int>(std::lround(hip_x)),
-                static_cast<int>(std::lround(spine_y)),
-                static_cast<int>(std::lround(tx)), static_cast<int>(std::lround(ty)));
-
-        // Neck (stops at the head outline), head, muzzle, ear.
-        LineTo2(hdc, static_cast<int>(std::lround(shoulder_x)),
-                static_cast<int>(std::lround(spine_y)),
-                static_cast<int>(std::lround(shoulder_x + 4.1 * scale)),
-                static_cast<int>(std::lround(spine_y - 5.9 * scale)));
-        const double dh_x = shoulder_x + 7.0 * scale;
-        const double dh_y = spine_y - 10.0 * scale;
-        const double dh_r = 5.0 * scale;
-        Ellipse(hdc,
-                static_cast<int>(std::lround(dh_x - dh_r)),
-                static_cast<int>(std::lround(dh_y - dh_r)),
-                static_cast<int>(std::lround(dh_x + dh_r)),
-                static_cast<int>(std::lround(dh_y + dh_r)));
-        LineTo2(hdc, static_cast<int>(std::lround(dh_x + 3.5 * scale)),
-                static_cast<int>(std::lround(dh_y + 0.8 * scale)),
-                static_cast<int>(std::lround(dh_x + 10.0 * scale)),
-                static_cast<int>(std::lround(dh_y + 2.2 * scale)));
-        LineTo2(hdc, static_cast<int>(std::lround(dh_x - 1.5 * scale)),
-                static_cast<int>(std::lround(dh_y - 4.0 * scale)),
-                static_cast<int>(std::lround(dh_x - 4.0 * scale)),
-                static_cast<int>(std::lround(dh_y - 9.5 * scale)));
-
-        // Eye: filled dot.
-        HBRUSH dogEyeBrush = CreateSolidBrush(kFgColor);
-        HGDIOBJ prevBrush = SelectObject(hdc, dogEyeBrush);
-        const double der = (std::max)(1.0, 0.9 * scale);
-        Ellipse(hdc,
-                static_cast<int>(std::lround(dh_x + 1.8 * scale - der)),
-                static_cast<int>(std::lround(dh_y - 1.2 * scale - der)),
-                static_cast<int>(std::lround(dh_x + 1.8 * scale + der)),
-                static_cast<int>(std::lround(dh_y - 1.2 * scale + der)));
-        SelectObject(hdc, prevBrush);
-        DeleteObject(dogEyeBrush);
-
-        SelectObject(hdc, oldBrush);
-        SelectObject(hdc, oldPen);
-        DeleteObject(dogPen);
-    }
+    // Dog trotting behind the walker, on the same ground line.
+    DrawDog(hdc, cx - 65.0 * scale, ground_y, scale, DogTrotPose(g_phase));
 }
 
 void AdvanceAnimation(HWND hwnd) {
@@ -719,9 +733,172 @@ LRESULT CALLBACK AnimationWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     }
 }
 
-LRESULT CALLBACK PlaceholderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+void DrawChase(HWND hwnd, HDC hdc) {
+    RECT client = {};
+    GetClientRect(hwnd, &client);
+    const int w = client.right - client.left;
+    const int h = client.bottom - client.top;
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    FillRect(hdc, &client, g_bgBrush);
+
+    const double scale = ViewScale(w, h);
+    const int stroke = (std::max)(2, static_cast<int>(std::lround(3.0 * scale)));
+    const int bird_w = (std::max)(1, stroke - 1);
+
+    // Same ground height as tab one (h*0.55 body anchor + 34+22+20 leg reach).
+    const double ground_y = h * 0.55 + 76.0 * scale;
+    HPEN groundPen = MakePen(kGroundColor, (std::max)(1, stroke - 1));
+    HGDIOBJ oldPen = SelectObject(hdc, groundPen);
+    LineTo2(hdc, 0, static_cast<int>(std::lround(ground_y)), w,
+            static_cast<int>(std::lround(ground_y)));
+    SelectObject(hdc, oldPen);
+    DeleteObject(groundPen);
+
+    // Chasing dog: same figure as tab one's trot, driven by the chase phase.
+    DrawDog(hdc, g_chaseDogX, ground_y, scale, DogTrotPose(g_chasePhase));
+
+    // Bird: perched on the ground until takeoff, then flapping just above
+    // the dog, body bobbing with the wingbeat.
+    double bx = 0.0;
+    double by = 0.0;
+    if (g_birdFlying) {
+        bx = g_birdFlyX;
+        by = ground_y - 5.0 * scale - g_birdAlt + 1.5 * scale * std::sin(g_birdFlap);
+    } else {
+        bx = w * 0.62;
+        by = ground_y - 5.0 * scale;
+    }
+
+    HPEN birdPen = MakePen(kFgColor, bird_w);
+    oldPen = SelectObject(hdc, birdPen);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+    // Tail fanning from the rear of the body.
+    LineTo2(hdc, static_cast<int>(std::lround(bx - 5.0 * scale)), static_cast<int>(std::lround(by)),
+            static_cast<int>(std::lround(bx - 9.5 * scale)), static_cast<int>(std::lround(by - 2.5 * scale)));
+    LineTo2(hdc, static_cast<int>(std::lround(bx - 5.0 * scale)), static_cast<int>(std::lround(by)),
+            static_cast<int>(std::lround(bx - 9.0 * scale)), static_cast<int>(std::lround(by + 1.5 * scale)));
+    // Body
+    LineTo2(hdc, static_cast<int>(std::lround(bx - 5.0 * scale)), static_cast<int>(std::lround(by)),
+            static_cast<int>(std::lround(bx + 5.5 * scale)), static_cast<int>(std::lround(by)));
+
+    const double wing_x = bx + 1.0 * scale;
+    const double wing_y = by - 0.5 * scale;
+    if (g_birdFlying) {
+        // Two wings flapping out of phase (far wing slightly shorter).
+        const double kOff[2] = {0.0, 0.9};
+        const double kLen[2] = {9.0, 7.5};
+        for (int i = 0; i < 2; ++i) {
+            const double ang = 2.36 - 1.1 * std::sin(g_birdFlap + kOff[i]);
+            double wx = 0, wy = 0;
+            LimbEnd(wing_x, wing_y, ang, kLen[i] * scale, &wx, &wy);
+            LineTo2(hdc, static_cast<int>(std::lround(wing_x)), static_cast<int>(std::lround(wing_y)),
+                    static_cast<int>(std::lround(wx)), static_cast<int>(std::lround(wy)));
+        }
+        // Tucked feet trailing under the body.
+        LineTo2(hdc, static_cast<int>(std::lround(bx + 0.5 * scale)), static_cast<int>(std::lround(by + 0.5 * scale)),
+                static_cast<int>(std::lround(bx + 2.5 * scale)), static_cast<int>(std::lround(by + 3.0 * scale)));
+    } else {
+        // Folded wing along the body; two legs down to the ground.
+        LineTo2(hdc, static_cast<int>(std::lround(wing_x)), static_cast<int>(std::lround(wing_y)),
+                static_cast<int>(std::lround(bx - 6.5 * scale)), static_cast<int>(std::lround(by - 2.0 * scale)));
+        LineTo2(hdc, static_cast<int>(std::lround(bx - 1.0 * scale)), static_cast<int>(std::lround(by)),
+                static_cast<int>(std::lround(bx - 2.0 * scale)), static_cast<int>(std::lround(ground_y)));
+        LineTo2(hdc, static_cast<int>(std::lround(bx + 2.5 * scale)), static_cast<int>(std::lround(by)),
+                static_cast<int>(std::lround(bx + 2.5 * scale)), static_cast<int>(std::lround(ground_y)));
+    }
+
+    // Head, beak, eye.
+    const double hx = bx + 8.0 * scale;
+    const double hy = by - 2.5 * scale;
+    const double hr = 3.0 * scale;
+    Ellipse(hdc,
+            static_cast<int>(std::lround(hx - hr)),
+            static_cast<int>(std::lround(hy - hr)),
+            static_cast<int>(std::lround(hx + hr)),
+            static_cast<int>(std::lround(hy + hr)));
+    LineTo2(hdc, static_cast<int>(std::lround(hx + 2.4 * scale)), static_cast<int>(std::lround(hy - 1.1 * scale)),
+            static_cast<int>(std::lround(hx + 5.6 * scale)), static_cast<int>(std::lround(hy + 0.2 * scale)));
+    LineTo2(hdc, static_cast<int>(std::lround(hx + 2.4 * scale)), static_cast<int>(std::lround(hy + 1.1 * scale)),
+            static_cast<int>(std::lround(hx + 5.6 * scale)), static_cast<int>(std::lround(hy + 0.2 * scale)));
+    HBRUSH eyeBrush = CreateSolidBrush(kFgColor);
+    HGDIOBJ prevBrush = SelectObject(hdc, eyeBrush);
+    const double ber = (std::max)(0.8, 0.7 * scale);
+    Ellipse(hdc,
+            static_cast<int>(std::lround(hx + 0.8 * scale - ber)),
+            static_cast<int>(std::lround(hy - 0.8 * scale - ber)),
+            static_cast<int>(std::lround(hx + 0.8 * scale + ber)),
+            static_cast<int>(std::lround(hy - 0.8 * scale + ber)));
+    SelectObject(hdc, prevBrush);
+    DeleteObject(eyeBrush);
+
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(birdPen);
+}
+
+void AdvanceChase(HWND hwnd) {
+    RECT client = {};
+    GetClientRect(hwnd, &client);
+    const int w = (std::max)(1L, client.right - client.left);
+    const int h = (std::max)(1L, client.bottom - client.top);
+    const double scale = ViewScale(w, h);
+
+    g_chasePhase += 0.065;
+    if (g_chasePhase >= 1.0) {
+        g_chasePhase -= 1.0;
+    }
+    const double speed = kChaseSpeed * (std::max)(w / 400.0, 0.75);
+    g_chaseDogX += speed;
+    const double dogNoseX = g_chaseDogX + 31.0 * scale;
+
+    if (!g_birdFlying) {
+        // Perched bird waits at a fixed spot; it takes off just before the
+        // dog's nose reaches it.
+        if (w * 0.62 - dogNoseX < 30.0 * scale) {
+            g_birdFlying = true;
+            g_birdFlyX = w * 0.62;
+            g_birdAlt = 0.0;
+        }
+    } else {
+        g_birdFlap += 0.35;
+        // Climb to cruise height, just above the dog's reach. alt is in
+        // px, so clamp it too in case the window shrank mid-flight.
+        const double cruise = 52.0 * scale;
+        g_birdAlt = (std::min)(g_birdAlt, cruise);
+        if (g_birdAlt < cruise) {
+            g_birdAlt = (std::min)(cruise, g_birdAlt + 1.4 * scale);
+        }
+        // Fly on just ahead of the dog (barely pulling away).
+        g_birdFlyX += speed + 0.2 * scale;
+        // Both off the right edge: restart the chase from the left.
+        if (g_birdFlyX > w + 30.0 && g_chaseDogX - 26.0 * scale > w) {
+            g_chaseDogX = -60.0;
+            g_birdFlying = false;
+            g_birdAlt = 0.0;
+            g_birdFlap = 0.0;
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+LRESULT CALLBACK ChaseWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+    case WM_CREATE:
+        SetTimer(hwnd, kTimerId, kFrameMs, nullptr);
+        return 0;
+
+    case WM_TIMER:
+        if (wParam == kTimerId) {
+            AdvanceChase(hwnd);
+        }
+        return 0;
+
     case WM_ERASEBKGND:
+        // Painted fully in WM_PAINT; skip default erase to avoid flicker.
         return 1;
 
     case WM_PAINT: {
@@ -730,29 +907,43 @@ LRESULT CALLBACK PlaceholderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
         RECT client = {};
         GetClientRect(hwnd, &client);
-        FillRect(hdc, &client, g_bgBrush);
-
+        const int w = client.right - client.left;
         const int h = client.bottom - client.top;
-        const int fontHeight = (std::max)(16, h / 10);
-        HFONT font = CreateFontW(
-            -fontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        HGDIOBJ oldFont = SelectObject(hdc, font ? font : GetStockObject(DEFAULT_GUI_FONT));
-        SetTextColor(hdc, kFgColor);
-        SetBkMode(hdc, TRANSPARENT);
-
-        const wchar_t text[] = L"TAB TWO PLACEHOLDER";
-        DrawTextW(hdc, text, -1, &client, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-        SelectObject(hdc, oldFont);
-        if (font) {
-            DeleteObject(font);
+        if (w <= 0 || h <= 0) {
+            EndPaint(hwnd, &ps);
+            return 0;
         }
+
+        // Double-buffer to reduce flicker while animating.
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = memDC ? CreateCompatibleBitmap(hdc, w, h) : nullptr;
+        if (!memDC || !memBmp) {
+            if (memBmp) {
+                DeleteObject(memBmp);
+            }
+            if (memDC) {
+                DeleteDC(memDC);
+            }
+            DrawChase(hwnd, hdc);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+        DrawChase(hwnd, memDC);
+        BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
 
         EndPaint(hwnd, &ps);
         return 0;
     }
+
+    case WM_DESTROY:
+        KillTimer(hwnd, kTimerId);
+        return 0;
 
     default:
         return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -772,8 +963,8 @@ bool RegisterChildClasses(HINSTANCE instance) {
         return false;
     }
 
-    wc.lpfnWndProc = PlaceholderWndProc;
-    wc.lpszClassName = kPlaceholderClass;
+    wc.lpfnWndProc = ChaseWndProc;
+    wc.lpszClassName = kChaseClass;
 
     return RegisterClassExW(&wc) != 0;
 }
@@ -818,9 +1009,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             instance,
             nullptr);
 
-        g_hwndPlaceholder = CreateWindowExW(
+        g_hwndChase = CreateWindowExW(
             0,
-            kPlaceholderClass,
+            kChaseClass,
             nullptr,
             WS_CHILD | WS_CLIPSIBLINGS,
             0, 0, 0, 0,
@@ -834,7 +1025,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_hwndTab && g_initialTab == 1) {
             SendMessageW(g_hwndTab, TCM_SETCURSEL, 1, 0);
             ShowWindow(g_hwndAnim, SW_HIDE);
-            ShowWindow(g_hwndPlaceholder, SW_SHOW);
+            ShowWindow(g_hwndChase, SW_SHOW);
         }
         return 0;
     }
@@ -853,7 +1044,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         const int paneW = rc.right - rc.left;
         const int paneH = rc.bottom - rc.top;
         MoveWindow(g_hwndAnim, rc.left, rc.top, paneW, paneH, TRUE);
-        MoveWindow(g_hwndPlaceholder, rc.left, rc.top, paneW, paneH, TRUE);
+        MoveWindow(g_hwndChase, rc.left, rc.top, paneW, paneH, TRUE);
         return 0;
     }
 
@@ -862,7 +1053,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (hdr && hdr->hwndFrom == g_hwndTab && hdr->code == TCN_SELCHANGE) {
             const int sel = static_cast<int>(SendMessageW(g_hwndTab, TCM_GETCURSEL, 0, 0));
             ShowWindow(g_hwndAnim, sel == 0 ? SW_SHOW : SW_HIDE);
-            ShowWindow(g_hwndPlaceholder, sel == 0 ? SW_HIDE : SW_SHOW);
+            ShowWindow(g_hwndChase, sel == 0 ? SW_HIDE : SW_SHOW);
             return 0;
         }
         return DefWindowProcW(hwnd, msg, wParam, lParam);
