@@ -1,5 +1,6 @@
-// macOS Cocoa clone of hello_world.py / hello_world.cpp — stick figure with a
-// hat walking across a dark window (title/colors/minsize/icon matched).
+// macOS Cocoa clone of hello_world.py / hello_world.cpp — tab one: stick figure
+// with a hat walking across a dark window (title/colors/minsize/icon matched);
+// tab two: dog-chases-bird chase scene.
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
@@ -35,6 +36,7 @@ constexpr CGFloat kGroundR = 0x2a / 255.0, kGroundG = 0x2a / 255.0, kGroundB = 0
 
 constexpr NSTimeInterval kFrameSeconds = 0.050;
 constexpr double kWalkSpeed = 2.4;
+constexpr double kChaseSpeed = 3.2;  // px per frame at default scale baseline (tab two dog)
 constexpr double kTau = 6.28318530717958647692;
 
 struct Pose {
@@ -268,6 +270,77 @@ void StrokeLine(CGContextRef ctx, CGFloat x1, CGFloat y1, CGFloat x2, CGFloat y2
     CGContextStrokePath(ctx);
 }
 
+void DrawDog(CGContextRef ctx, CGFloat h, double dog_cx, double ground_y, double scale,
+             const DogPose& dpose) {
+    // Stick-figure dog with its spine on the ground line (shared by both
+    // tabs); drawn one stroke thinner than the walker so it reads as the
+    // smaller figure.
+    const double kPi = 3.14159265358979323846;
+    const int stroke = std::max(2, static_cast<int>(std::lround(3.0 * scale)));
+    const CGFloat dog_w = static_cast<CGFloat>(std::max(1, stroke - 1));
+    const double d_upper = 10.0 * scale;
+    const double d_lower = 9.0 * scale;
+    const double half_body = 14.0 * scale;
+    const double spine_y = ground_y - 19.0 * scale + dpose.bob * scale;
+    const double shoulder_x = dog_cx + half_body;
+    const double hip_x = dog_cx - half_body;
+
+    CGContextSetRGBStrokeColor(ctx, kFgR, kFgG, kFgB, 1.0);
+    CGContextSetLineWidth(ctx, dog_w);
+
+    // Spine
+    StrokeLine(ctx, static_cast<CGFloat>(hip_x), FlipY(spine_y, h),
+               static_cast<CGFloat>(shoulder_x), FlipY(spine_y, h));
+
+    // Legs: both legs of a diagonal pair share angle/fold; front pair
+    // hangs from the shoulder, rear pair from the hip.
+    const double attach[4] = {shoulder_x, shoulder_x, hip_x, hip_x};
+    const double dAng[4] = {dpose.pair_a, dpose.pair_b, dpose.pair_b, dpose.pair_a};
+    const double dFold[4] = {dpose.fold_a, dpose.fold_b, dpose.fold_b, dpose.fold_a};
+    for (int i = 0; i < 4; ++i) {
+        double kx = 0, ky = 0, px = 0, py = 0;
+        LimbEnd(attach[i], spine_y, dAng[i], d_upper, &kx, &ky);
+        LimbEnd(kx, ky, dAng[i] - dFold[i], d_lower, &px, &py);
+        StrokeLine(ctx, static_cast<CGFloat>(attach[i]), FlipY(spine_y, h),
+                   static_cast<CGFloat>(kx), FlipY(ky, h));
+        StrokeLine(ctx, static_cast<CGFloat>(kx), FlipY(ky, h),
+                   static_cast<CGFloat>(px), FlipY(py, h));
+    }
+
+    // Tail: up-backward from the hip, wagging about its base angle.
+    double tx = 0, ty = 0;
+    LimbEnd(hip_x, spine_y, kPi + 0.55 + dpose.tail, 12.0 * scale, &tx, &ty);
+    StrokeLine(ctx, static_cast<CGFloat>(hip_x), FlipY(spine_y, h),
+               static_cast<CGFloat>(tx), FlipY(ty, h));
+
+    // Neck (stops at the head outline), head, muzzle, ear, eye.
+    StrokeLine(ctx, static_cast<CGFloat>(shoulder_x), FlipY(spine_y, h),
+               static_cast<CGFloat>(shoulder_x + 4.1 * scale),
+               FlipY(spine_y - 5.9 * scale, h));
+    const double dh_x = shoulder_x + 7.0 * scale;
+    const double dh_y = spine_y - 10.0 * scale;
+    const double dh_r = 5.0 * scale;
+    CGContextStrokeEllipseInRect(
+        ctx, CGRectMake(static_cast<CGFloat>(dh_x - dh_r), FlipY(dh_y + dh_r, h),
+                        static_cast<CGFloat>(dh_r * 2.0),
+                        static_cast<CGFloat>(dh_r * 2.0)));
+    StrokeLine(ctx, static_cast<CGFloat>(dh_x + 3.5 * scale),
+               FlipY(dh_y + 0.8 * scale, h),
+               static_cast<CGFloat>(dh_x + 10.0 * scale),
+               FlipY(dh_y + 2.2 * scale, h));
+    StrokeLine(ctx, static_cast<CGFloat>(dh_x - 1.5 * scale),
+               FlipY(dh_y - 4.0 * scale, h),
+               static_cast<CGFloat>(dh_x - 4.0 * scale),
+               FlipY(dh_y - 9.5 * scale, h));
+    const double der = std::max(1.0, 0.9 * scale);
+    CGContextSetRGBFillColor(ctx, kFgR, kFgG, kFgB, 1.0);
+    CGContextFillEllipseInRect(
+        ctx, CGRectMake(static_cast<CGFloat>(dh_x + 1.8 * scale - der),
+                        FlipY(dh_y - 1.2 * scale + der, h),
+                        static_cast<CGFloat>(der * 2.0),
+                        static_cast<CGFloat>(der * 2.0)));
+}
+
 void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPos) {
     if (w <= 0 || h <= 0) {
         return;
@@ -411,73 +484,114 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
 
     // Dog trotting behind the walker, on the same ground line; drawn one
     // stroke thinner so it reads as the smaller figure.
-    {
-        const double kPi = 3.14159265358979323846;
-        const DogPose dpose = DogTrotPose(phase);
-        const CGFloat dog_w =
-            static_cast<CGFloat>(std::max(1, static_cast<int>(stroke) - 1));
-        const double d_upper = 10.0 * scale;
-        const double d_lower = 9.0 * scale;
-        const double half_body = 14.0 * scale;
-        const double dog_cx = cx - 65.0 * scale;
-        const double spine_y = ground_y - 19.0 * scale + dpose.bob * scale;
-        const double shoulder_x = dog_cx + half_body;
-        const double hip_x = dog_cx - half_body;
+    DrawDog(ctx, h, cx - 65.0 * scale, ground_y, scale, DogTrotPose(phase));
+}
 
-        CGContextSetLineWidth(ctx, dog_w);
+// Tab two chase scene state: the dog runs in from the left; the bird waits
+// on the ground, then takes off just before the dog reaches it.
+struct ChaseState {
+    double phase = 0.0;   // trot phase of the chasing dog (+0.065 per frame)
+    double dogX = -60.0;  // dog center x; respawns at -60
+    bool flying = false;  // bird airborne (false = perched on the ground)
+    double flyX = 0.0;    // bird x once flying
+    double alt = 0.0;     // px climbed since takeoff (0 = perched)
+    double flap = 0.0;    // wingbeat phase (+0.35 per frame while flying)
+};
 
-        // Spine
-        StrokeLine(ctx, static_cast<CGFloat>(hip_x), FlipY(spine_y, h),
-                   static_cast<CGFloat>(shoulder_x), FlipY(spine_y, h));
-
-        // Legs: both legs of a diagonal pair share angle/fold; front pair
-        // hangs from the shoulder, rear pair from the hip.
-        const double attach[4] = {shoulder_x, shoulder_x, hip_x, hip_x};
-        const double dAng[4] = {dpose.pair_a, dpose.pair_b, dpose.pair_b, dpose.pair_a};
-        const double dFold[4] = {dpose.fold_a, dpose.fold_b, dpose.fold_b, dpose.fold_a};
-        for (int i = 0; i < 4; ++i) {
-            double kx = 0, ky = 0, px = 0, py = 0;
-            LimbEnd(attach[i], spine_y, dAng[i], d_upper, &kx, &ky);
-            LimbEnd(kx, ky, dAng[i] - dFold[i], d_lower, &px, &py);
-            StrokeLine(ctx, static_cast<CGFloat>(attach[i]), FlipY(spine_y, h),
-                       static_cast<CGFloat>(kx), FlipY(ky, h));
-            StrokeLine(ctx, static_cast<CGFloat>(kx), FlipY(ky, h),
-                       static_cast<CGFloat>(px), FlipY(py, h));
-        }
-
-        // Tail: up-backward from the hip, wagging about its base angle.
-        double tx = 0, ty = 0;
-        LimbEnd(hip_x, spine_y, kPi + 0.55 + dpose.tail, 12.0 * scale, &tx, &ty);
-        StrokeLine(ctx, static_cast<CGFloat>(hip_x), FlipY(spine_y, h),
-                   static_cast<CGFloat>(tx), FlipY(ty, h));
-
-        // Neck (stops at the head outline), head, muzzle, ear, eye.
-        StrokeLine(ctx, static_cast<CGFloat>(shoulder_x), FlipY(spine_y, h),
-                   static_cast<CGFloat>(shoulder_x + 4.1 * scale),
-                   FlipY(spine_y - 5.9 * scale, h));
-        const double dh_x = shoulder_x + 7.0 * scale;
-        const double dh_y = spine_y - 10.0 * scale;
-        const double dh_r = 5.0 * scale;
-        CGContextStrokeEllipseInRect(
-            ctx, CGRectMake(static_cast<CGFloat>(dh_x - dh_r), FlipY(dh_y + dh_r, h),
-                            static_cast<CGFloat>(dh_r * 2.0),
-                            static_cast<CGFloat>(dh_r * 2.0)));
-        StrokeLine(ctx, static_cast<CGFloat>(dh_x + 3.5 * scale),
-                   FlipY(dh_y + 0.8 * scale, h),
-                   static_cast<CGFloat>(dh_x + 10.0 * scale),
-                   FlipY(dh_y + 2.2 * scale, h));
-        StrokeLine(ctx, static_cast<CGFloat>(dh_x - 1.5 * scale),
-                   FlipY(dh_y - 4.0 * scale, h),
-                   static_cast<CGFloat>(dh_x - 4.0 * scale),
-                   FlipY(dh_y - 9.5 * scale, h));
-        const double der = std::max(1.0, 0.9 * scale);
-        CGContextSetRGBFillColor(ctx, kFgR, kFgG, kFgB, 1.0);
-        CGContextFillEllipseInRect(
-            ctx, CGRectMake(static_cast<CGFloat>(dh_x + 1.8 * scale - der),
-                            FlipY(dh_y - 1.2 * scale + der, h),
-                            static_cast<CGFloat>(der * 2.0),
-                            static_cast<CGFloat>(der * 2.0)));
+void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
+    if (w <= 0 || h <= 0) {
+        return;
     }
+
+    CGContextSetRGBFillColor(ctx, kBgR, kBgG, kBgB, 1.0);
+    CGContextFillRect(ctx, CGRectMake(0, 0, w, h));
+
+    const double scale = ViewScale(w, h);
+    const CGFloat stroke =
+        static_cast<CGFloat>(std::max(2, static_cast<int>(std::lround(3.0 * scale))));
+    const CGFloat bird_w = static_cast<CGFloat>(std::max(1, static_cast<int>(stroke) - 1));
+
+    CGContextSetLineCap(ctx, kCGLineCapRound);
+    CGContextSetLineJoin(ctx, kCGLineJoinRound);
+
+    // Same ground height as tab one (h*0.55 body anchor + 34+22+20 leg reach).
+    const double ground_y = h * 0.55 + 76.0 * scale;
+    CGContextSetRGBStrokeColor(ctx, kGroundR, kGroundG, kGroundB, 1.0);
+    CGContextSetLineWidth(ctx, static_cast<CGFloat>(std::max(1, static_cast<int>(stroke) - 1)));
+    StrokeLine(ctx, 0, FlipY(ground_y, h), w, FlipY(ground_y, h));
+
+    // Chasing dog: same figure as tab one's trot, driven by the chase phase.
+    DrawDog(ctx, h, cs.dogX, ground_y, scale, DogTrotPose(cs.phase));
+
+    // Bird: perched on the ground until takeoff, then flapping just above
+    // the dog, body bobbing with the wingbeat.
+    double bx = 0.0;
+    double by = 0.0;
+    if (cs.flying) {
+        bx = cs.flyX;
+        by = ground_y - 5.0 * scale - cs.alt + 1.5 * scale * std::sin(cs.flap);
+    } else {
+        bx = w * 0.62;
+        by = ground_y - 5.0 * scale;
+    }
+
+    CGContextSetRGBStrokeColor(ctx, kFgR, kFgG, kFgB, 1.0);
+    CGContextSetLineWidth(ctx, bird_w);
+
+    // Tail fanning from the rear of the body.
+    StrokeLine(ctx, static_cast<CGFloat>(bx - 5.0 * scale), FlipY(by, h),
+               static_cast<CGFloat>(bx - 9.5 * scale), FlipY(by - 2.5 * scale, h));
+    StrokeLine(ctx, static_cast<CGFloat>(bx - 5.0 * scale), FlipY(by, h),
+               static_cast<CGFloat>(bx - 9.0 * scale), FlipY(by + 1.5 * scale, h));
+    // Body
+    StrokeLine(ctx, static_cast<CGFloat>(bx - 5.0 * scale), FlipY(by, h),
+               static_cast<CGFloat>(bx + 5.5 * scale), FlipY(by, h));
+
+    const double wing_x = bx + 1.0 * scale;
+    const double wing_y = by - 0.5 * scale;
+    if (cs.flying) {
+        // Two wings flapping out of phase (far wing slightly shorter).
+        const double kOff[2] = {0.0, 0.9};
+        const double kLen[2] = {9.0, 7.5};
+        for (int i = 0; i < 2; ++i) {
+            const double ang = 2.36 - 1.1 * std::sin(cs.flap + kOff[i]);
+            double wx = 0, wy = 0;
+            LimbEnd(wing_x, wing_y, ang, kLen[i] * scale, &wx, &wy);
+            StrokeLine(ctx, static_cast<CGFloat>(wing_x), FlipY(wing_y, h),
+                       static_cast<CGFloat>(wx), FlipY(wy, h));
+        }
+        // Tucked feet trailing under the body.
+        StrokeLine(ctx, static_cast<CGFloat>(bx + 0.5 * scale), FlipY(by + 0.5 * scale, h),
+                   static_cast<CGFloat>(bx + 2.5 * scale), FlipY(by + 3.0 * scale, h));
+    } else {
+        // Folded wing along the body; two legs down to the ground.
+        StrokeLine(ctx, static_cast<CGFloat>(wing_x), FlipY(wing_y, h),
+                   static_cast<CGFloat>(bx - 6.5 * scale), FlipY(by - 2.0 * scale, h));
+        StrokeLine(ctx, static_cast<CGFloat>(bx - 1.0 * scale), FlipY(by, h),
+                   static_cast<CGFloat>(bx - 2.0 * scale), FlipY(ground_y, h));
+        StrokeLine(ctx, static_cast<CGFloat>(bx + 2.5 * scale), FlipY(by, h),
+                   static_cast<CGFloat>(bx + 2.5 * scale), FlipY(ground_y, h));
+    }
+
+    // Head, beak, eye.
+    const double hx = bx + 8.0 * scale;
+    const double hy = by - 2.5 * scale;
+    const double hr = 3.0 * scale;
+    CGContextStrokeEllipseInRect(ctx, CGRectMake(static_cast<CGFloat>(hx - hr),
+                                                 FlipY(hy + hr, h),
+                                                 static_cast<CGFloat>(hr * 2.0),
+                                                 static_cast<CGFloat>(hr * 2.0)));
+    StrokeLine(ctx, static_cast<CGFloat>(hx + 2.4 * scale), FlipY(hy - 1.1 * scale, h),
+               static_cast<CGFloat>(hx + 5.6 * scale), FlipY(hy + 0.2 * scale, h));
+    StrokeLine(ctx, static_cast<CGFloat>(hx + 2.4 * scale), FlipY(hy + 1.1 * scale, h),
+               static_cast<CGFloat>(hx + 5.6 * scale), FlipY(hy + 0.2 * scale, h));
+    const double ber = std::max(0.8, 0.7 * scale);
+    CGContextSetRGBFillColor(ctx, kFgR, kFgG, kFgB, 1.0);
+    CGContextFillEllipseInRect(
+        ctx, CGRectMake(static_cast<CGFloat>(hx + 0.8 * scale - ber),
+                        FlipY(hy - 0.8 * scale + ber, h),
+                        static_cast<CGFloat>(ber * 2.0),
+                        static_cast<CGFloat>(ber * 2.0)));
 }
 
 }  // namespace
@@ -561,9 +675,114 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
 
 @end
 
+// Tab two: dog-chases-bird chase scene (mirror of hello_world.py canvas_two).
+@interface ChaseView : NSView {
+    ChaseState _chase;
+}
+@property(nonatomic, strong) NSTimer* timer;
+- (void)startAnimation;
+- (void)stopAnimation;
+@end
+
+@implementation ChaseView
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        _chase = ChaseState{};
+        self.wantsLayer = YES;  // layer-backed; drawRect content is buffered
+    }
+    return self;
+}
+
+- (BOOL)isFlipped {
+    // Keep AppKit default (bottom-left origin); DrawChase flips y itself to match Tk/Win32.
+    return NO;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+    if (!ctx) {
+        return;
+    }
+    const NSRect bounds = self.bounds;
+    DrawChase(ctx, bounds.size.width, bounds.size.height, _chase);
+}
+
+- (void)startAnimation {
+    [self stopAnimation];
+    __weak ChaseView* weakSelf = self;
+    self.timer = [NSTimer timerWithTimeInterval:kFrameSeconds
+                                        repeats:YES
+                                          block:^(__unused NSTimer* t) {
+                                            ChaseView* view = weakSelf;
+                                            if (!view) {
+                                                return;
+                                            }
+                                            [view advance];
+                                          }];
+    [[NSRunLoop mainRunLoop] addTimer:self.timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopAnimation {
+    [self.timer invalidate];
+    self.timer = nil;
+}
+
+- (void)advance {
+    const CGFloat w = std::max<CGFloat>(1.0, self.bounds.size.width);
+    const CGFloat h = std::max<CGFloat>(1.0, self.bounds.size.height);
+    const double scale = ViewScale(static_cast<double>(w), static_cast<double>(h));
+
+    _chase.phase += 0.065;
+    if (_chase.phase >= 1.0) {
+        _chase.phase -= 1.0;
+    }
+    const double speed = kChaseSpeed * std::max(static_cast<double>(w) / 400.0, 0.75);
+    _chase.dogX += speed;
+    const double dogNoseX = _chase.dogX + 31.0 * scale;
+
+    if (!_chase.flying) {
+        // Perched bird waits at a fixed spot; it takes off just before the
+        // dog's nose reaches it.
+        if (w * 0.62 - dogNoseX < 30.0 * scale) {
+            _chase.flying = true;
+            _chase.flyX = w * 0.62;
+            _chase.alt = 0.0;
+        }
+    } else {
+        _chase.flap += 0.35;
+        // Climb to cruise height, just above the dog's reach. alt is in
+        // px, so clamp it too in case the window shrank mid-flight.
+        const double cruise = 52.0 * scale;
+        _chase.alt = std::min(_chase.alt, cruise);
+        if (_chase.alt < cruise) {
+            _chase.alt = std::min(cruise, _chase.alt + 1.4 * scale);
+        }
+        // Fly on just ahead of the dog (barely pulling away).
+        _chase.flyX += speed + 0.2 * scale;
+        // Both off the right edge: restart the chase from the left.
+        if (_chase.flyX > w + 30.0 && _chase.dogX - 26.0 * scale > w) {
+            _chase.dogX = -60.0;
+            _chase.flying = false;
+            _chase.alt = 0.0;
+            _chase.flap = 0.0;
+        }
+    }
+    [self setNeedsDisplay:YES];
+}
+
+- (void)dealloc {
+    [self stopAnimation];
+}
+
+@end
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, strong) NSWindow* window;
 @property(nonatomic, strong) WalkerView* walker;
+@property(nonatomic, strong) ChaseView* chase;
 @end
 
 @implementation AppDelegate
@@ -633,28 +852,9 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
 
     NSTabViewItem* itemTwo = [[NSTabViewItem alloc] initWithIdentifier:@"two"];
     itemTwo.label = @"two";
-    NSView* placeholder = [[NSView alloc] initWithFrame:contentRect];
-    placeholder.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    placeholder.wantsLayer = YES;
-    placeholder.layer.backgroundColor =
-        [[NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0] CGColor];
-
-    // Single-line strip centered vertically (a full-bounds NSTextField draws
-    // its text at the top); flexible margins keep it centered on resize.
-    const CGFloat labelH = 40;
-    NSTextField* label = [[NSTextField alloc]
-        initWithFrame:NSMakeRect(0, (placeholder.bounds.size.height - labelH) / 2,
-                                 placeholder.bounds.size.width, labelH)];
-    label.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
-    label.stringValue = @"TAB TWO PLACEHOLDER";
-    label.editable = NO;
-    label.bordered = NO;
-    label.backgroundColor = [NSColor clearColor];
-    label.textColor = [NSColor colorWithCalibratedRed:kFgR green:kFgG blue:kFgB alpha:1.0];
-    label.alignment = NSTextAlignmentCenter;
-    [label setFont:[NSFont systemFontOfSize:24]];
-    [placeholder addSubview:label];
-    itemTwo.view = placeholder;
+    self.chase = [[ChaseView alloc] initWithFrame:contentRect];
+    self.chase.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    itemTwo.view = self.chase;
     [tabView addTabViewItem:itemTwo];
 
     [tabView selectTabViewItem:(saved.valid && saved.tab == 1) ? itemTwo : itemOne];
@@ -665,6 +865,7 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     [self.window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
     [self.walker startAnimation];
+    [self.chase startAnimation];
 }
 
 - (void)tryLoadIcon {
@@ -708,6 +909,7 @@ void DrawWalker(CGContextRef ctx, CGFloat w, CGFloat h, double phase, double xPo
     (void)notification;
     SaveGeometryFromWindow(self.window);
     [self.walker stopAnimation];
+    [self.chase stopAnimation];
 }
 
 @end
