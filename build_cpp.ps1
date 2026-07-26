@@ -22,11 +22,20 @@ if (-not (Test-Path $vcvars)) {
 $outExe = Join-Path $RepoRoot "hello_world_cpp.exe"
 $bat = Join-Path $env:TEMP ("build_hello_world_{0}.bat" -f [guid]::NewGuid().ToString("N"))
 
+if ($vcvars.Contains('"') -or $RepoRoot.Contains('"')) {
+    throw "Paths containing double quotes are not supported: $vcvars / $RepoRoot"
+}
+
+# Pass paths to the .bat via env vars instead of interpolating them: cmd expands
+# %-sequences and re-splits quotes in baked-in paths when the bat runs.
+$env:HW_VCVARS = $vcvars
+$env:HW_ROOT = $RepoRoot
+
 @"
 @echo off
 setlocal
-call "$vcvars" || exit /b 1
-cd /d "$RepoRoot" || exit /b 1
+call "%HW_VCVARS%" || exit /b 1
+cd /d "%HW_ROOT%" || exit /b 1
 cl /nologo /EHsc /std:c++17 /W4 /O2 /DUNICODE /D_UNICODE hello_world.cpp /Fe:hello_world_cpp.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib comctl32.lib
 exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $bat -Encoding ASCII
@@ -39,6 +48,8 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $bat -Force -ErrorAction SilentlyContinue
+    Remove-Item Env:HW_VCVARS -ErrorAction SilentlyContinue
+    Remove-Item Env:HW_ROOT -ErrorAction SilentlyContinue
 }
 
 if (-not (Test-Path -LiteralPath $outExe)) {

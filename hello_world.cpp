@@ -52,6 +52,9 @@ const wchar_t kWindowTitle[] = L"Hello World";
 HBRUSH g_bgBrush = nullptr;
 HICON g_iconBig = nullptr;
 HICON g_iconSmall = nullptr;
+// File-loaded icons need DestroyIcon; shared ones (LoadIcon) must not be destroyed.
+bool g_iconBigOwned = false;
+bool g_iconSmallOwned = false;
 
 HWND g_hwndTab = nullptr;
 HWND g_hwndAnim = nullptr;
@@ -290,11 +293,26 @@ void SaveGeometry(const WindowGeometry& g) {
 void SaveGeometryFromHwnd(HWND hwnd) {
     RECT wr = {};
     RECT cr = {};
-    if (!GetWindowRect(hwnd, &wr) || !GetClientRect(hwnd, &cr)) {
-        return;
-    }
-    // Skip save while minimized — coords are not useful.
     if (IsIconic(hwnd)) {
+        // Minimized: GetWindowRect reports the iconic position and the client
+        // rect is empty, so persist the last normal placement instead — closing
+        // from the taskbar while minimized must still keep geometry and tab.
+        WINDOWPLACEMENT wp = {};
+        wp.length = sizeof(wp);
+        if (!GetWindowPlacement(hwnd, &wp)) {
+            return;
+        }
+        wr = wp.rcNormalPosition;
+        // Derive the client size from the normal outer frame by subtracting the
+        // non-client frame extents for this window's styles.
+        RECT frame = {};
+        const DWORD wstyle = static_cast<DWORD>(GetWindowLongW(hwnd, GWL_STYLE));
+        const DWORD wexStyle = static_cast<DWORD>(GetWindowLongW(hwnd, GWL_EXSTYLE));
+        if (AdjustWindowRectEx(&frame, wstyle, FALSE, wexStyle)) {
+            cr.right = (wr.right - wr.left) - (frame.right - frame.left);
+            cr.bottom = (wr.bottom - wr.top) - (frame.bottom - frame.top);
+        }
+    } else if (!GetWindowRect(hwnd, &wr) || !GetClientRect(hwnd, &cr)) {
         return;
     }
     WindowGeometry g{};
@@ -341,7 +359,11 @@ void TryLoadIcons(HINSTANCE instance) {
         GetSystemMetrics(SM_CYSMICON),
         LR_LOADFROMFILE | LR_DEFAULTCOLOR));
 
+    g_iconBigOwned = (g_iconBig != nullptr);
+    g_iconSmallOwned = (g_iconSmall != nullptr);
+
     if (!g_iconBig) {
+        // Shared resource icon: must NOT be DestroyIcon'd (owned flag stays false).
         g_iconBig = LoadIconW(instance, MAKEINTRESOURCEW(1));
     }
     if (!g_iconSmall) {
@@ -380,14 +402,16 @@ bool ClientSizeToOuter(DWORD style, DWORD exStyle, int clientW, int clientH,
 }
 
 void CleanupGlobals() {
-    if (g_iconSmall && g_iconSmall != g_iconBig) {
+    if (g_iconSmall && g_iconSmall != g_iconBig && g_iconSmallOwned) {
         DestroyIcon(g_iconSmall);
     }
     g_iconSmall = nullptr;
-    if (g_iconBig) {
+    g_iconSmallOwned = false;
+    if (g_iconBig && g_iconBigOwned) {
         DestroyIcon(g_iconBig);
     }
     g_iconBig = nullptr;
+    g_iconBigOwned = false;
     if (g_bgBrush) {
         DeleteObject(g_bgBrush);
         g_bgBrush = nullptr;
@@ -1008,6 +1032,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessageW(g_hwndTab, TCM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&item));
             item.pszText = const_cast<LPWSTR>(L"two");
             SendMessageW(g_hwndTab, TCM_INSERTITEMW, 1, reinterpret_cast<LPARAM>(&item));
+        }
+        if (!g_hwndTab) {
+            // Without the tab control the child panes would be created parentless
+            // (stray top-level windows); fail WM_CREATE instead of running broken.
+            // CreateWindowExW then fails and wWinMain cleans up.
+            return -1;
         }
 
         g_hwndAnim = CreateWindowExW(

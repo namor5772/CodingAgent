@@ -242,10 +242,15 @@ void SaveGeometryFromWindow(NSWindow* window) {
     WindowGeometry g{};
     // Store top-left style origin for cross-app JSON consistency: convert from
     // AppKit bottom-left frame origin to a top-left-ish x/y matching Tk/Win32.
-    NSScreen* screen = window.screen ?: [NSScreen mainScreen];
-    const CGFloat screenH = screen ? screen.frame.size.height : 0;
+    // Reference the PRIMARY screen's top in global coords (NSMaxY), not one
+    // screen's height: secondary screens have non-zero frame origins, so a
+    // per-screen height misplaces y on multi-monitor layouts. Restore uses the
+    // same fixed reference; y may legitimately be negative for screens arranged
+    // above the primary.
+    NSScreen* screen = [NSScreen mainScreen];
+    const CGFloat screenTop = screen ? NSMaxY(screen.frame) : 0;
     g.x = static_cast<int>(std::lround(frame.origin.x));
-    g.y = static_cast<int>(std::lround(screenH - frame.origin.y - frame.size.height));
+    g.y = static_cast<int>(std::lround(screenTop - NSMaxY(frame)));
     g.w = static_cast<int>(std::lround(content.size.width));
     g.h = static_cast<int>(std::lround(content.size.height));
     if (g.w < kMinWidth) {
@@ -791,7 +796,7 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
 
 @end
 
-@interface AppDelegate : NSObject <NSApplicationDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @property(nonatomic, strong) NSWindow* window;
 @property(nonatomic, strong) WalkerView* walker;
 @property(nonatomic, strong) ChaseView* chase;
@@ -801,6 +806,18 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification {
     (void)notification;
+
+    // Minimal main menu so Cmd+Q quits like a native app (no MainMenu.nib).
+    // terminate: runs the normal applicationWillTerminate path (persists geometry).
+    NSMenu* menubar = [[NSMenu alloc] init];
+    NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
+    [menubar addItem:appMenuItem];
+    NSMenu* appMenu = [[NSMenu alloc] init];
+    [appMenu addItem:[[NSMenuItem alloc] initWithTitle:@"Quit Hello World"
+                                                action:@selector(terminate:)
+                                         keyEquivalent:@"q"]];
+    appMenuItem.submenu = appMenu;
+    NSApp.mainMenu = menubar;
 
     const NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
@@ -824,21 +841,29 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
         [NSColor colorWithCalibratedRed:kBgR green:kBgG blue:kBgB alpha:1.0];
     [self.window setContentMinSize:NSMakeSize(kMinWidth, kMinHeight)];
     self.window.releasedWhenClosed = NO;
+    self.window.delegate = self;  // windowWillClose: persists geometry on close
 
     if (saved.valid) {
-        // JSON stores top-left style y (Tk/Win32); convert to AppKit bottom-left frame.
+        // JSON stores top-left style y (Tk/Win32); convert to AppKit bottom-left
+        // frame using the same primary-screen-top reference as the save path.
         NSScreen* screen = [NSScreen mainScreen];
-        const CGFloat screenH = screen ? screen.frame.size.height : 0;
+        const CGFloat screenTop = screen ? NSMaxY(screen.frame) : 0;
         const NSRect curFrame = self.window.frame;
         const CGFloat frameH = curFrame.size.height;
         const CGFloat frameW = curFrame.size.width;
         const CGFloat frameX = static_cast<CGFloat>(saved.x);
-        const CGFloat frameY = screenH - static_cast<CGFloat>(saved.y) - frameH;
+        const CGFloat frameY = screenTop - static_cast<CGFloat>(saved.y) - frameH;
         NSRect placed = NSMakeRect(frameX, frameY, frameW, frameH);
-        // If the restored top-left is off every screen, center instead.
+        // Center instead unless the restored frame would be usefully visible on
+        // some screen: a >= 40x40 chunk of the body within the visible frame and
+        // part of the title-bar strip showing so the window stays grabbable.
         BOOL onScreen = NO;
+        const NSRect titleStrip = NSMakeRect(frameX, frameY + frameH - 20, frameW, 20);
         for (NSScreen* s in [NSScreen screens]) {
-            if (NSPointInRect(NSMakePoint(frameX + 20, frameY + frameH - 20), s.frame)) {
+            const NSRect vis = s.visibleFrame;
+            const NSRect body = NSIntersectionRect(placed, vis);
+            const NSRect title = NSIntersectionRect(titleStrip, vis);
+            if (body.size.width >= 40 && body.size.height >= 40 && title.size.width >= 20) {
                 onScreen = YES;
                 break;
             }
@@ -915,6 +940,14 @@ void DrawChase(CGContextRef ctx, CGFloat w, CGFloat h, const ChaseState& cs) {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;
     return YES;
+}
+
+- (void)windowWillClose:(NSNotification*)notification {
+    (void)notification;
+    // Persist on close as well as on terminate: geometry+tab survive even if
+    // the terminate path is skipped later (crash/force-quit after this point
+    // still loses them, but normal close no longer depends on willTerminate).
+    SaveGeometryFromWindow(self.window);
 }
 
 - (void)applicationWillTerminate:(NSNotification*)notification {

@@ -118,6 +118,7 @@ macOS "shortcuts" are minimal `.app` bundles (shell launcher in `Contents/MacOS`
 - Python shortcut Windows: COM `WScript.Shell`.CreateShortcut on `%Desktop%\Hello World.lnk` — check `TargetPath` (pythonw), `Arguments` (hello_world.py), `IconLocation`.
 - C++ shortcut Windows: same for `%Desktop%\Hello World (C++).lnk` — `TargetPath` = `hello_world_cpp.exe`, empty `Arguments`, `WorkingDirectory` = repo root, `IconLocation` from `hello_world.ico`.
 - macOS shortcuts: `~/Desktop/Hello World.app` and `~/Desktop/Hello World (C++).app` — check `Contents/MacOS/*` launcher paths, `Info.plist` `CFBundleExecutable` / icon, and `Resources/hello_world.icns` when present.
+- Agent-shell GUI smoke quirks (this machine): command runners that wait on the whole process tree hang if the app is backgrounded with `&` — launch `hello_world_cpp` detached instead (e.g. `python3 -c "import subprocess; subprocess.Popen(['./hello_world_cpp'], stdin=subprocess.DEVNULL, stdout=open('/tmp/hw.log','w'), stderr=subprocess.STDOUT, start_new_session=True)"`). `CGWindowListCopyWindowInfo` redacts window titles without Screen Recording permission — find the app window by owner PID + window layer 0, not by name. A synthesized CGEvent click at (window.x+20, window.y+14) hits the close button and exercises the graceful-close path; a synthesized Cmd+Q exercises the menu/terminate path.
 
 ## Conventions
 

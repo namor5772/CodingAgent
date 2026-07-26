@@ -185,7 +185,7 @@ All apps aim to match:
 
 Windows C++ draws each animation in a child window of the tab control (the chase scene is a second child window with its own frame timer, shown/hidden on `TCN_SELCHANGE`) with double-buffered GDI (`WM_PAINT` + compatible bitmap), round pen caps via `ExtCreatePen`, and the same draw order as the Python canvas (torso, head, face, hat, arms, legs, then the dog).
 
-macOS C++ embeds each animation as its own layer-backed `NSView` in the two `NSTabView` items (walker in tab one, chase scene in tab two) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order. The window forces the dark-aqua appearance regardless of the system setting — under light aqua the unselected tab label draws dark-on-dark over the canvas and becomes unreadable.
+macOS C++ embeds each animation as its own layer-backed `NSView` in the two `NSTabView` items (walker in tab one, chase scene in tab two) and draws with Core Graphics in `drawRect:`, round line caps/joins, Y-flipped so the shared top-left walk math matches Win32/Tk, and the same draw order. The window forces the dark-aqua appearance regardless of the system setting — under light aqua the unselected tab label draws dark-on-dark over the canvas and becomes unreadable. A minimal programmatic main menu (no nib) provides the standard app menu with **Quit Hello World** (⌘Q), which runs the same termination path that saves geometry.
 
 ## Window state persistence
 
@@ -221,7 +221,7 @@ Both apps read and write the same keys (`w` / `h` are **client** width and heigh
 ### When it saves and restores
 
 - **Restore:** on startup, if the file exists and parses cleanly (geometry and selected tab).
-- **Save:** when the window is closing (Python `WM_DELETE_WINDOW` / destroy path; Win32 `WM_CLOSE`; macOS app termination). The selected tab is written in the same pass. Minimized windows are skipped on Win32 so iconified coordinates are not stored.
+- **Save:** when the window is closing (Python `WM_DELETE_WINDOW` / destroy path; Win32 `WM_CLOSE`; macOS window close and again at app termination). The selected tab is written in the same pass. On Win32, closing while minimized persists the last normal (restored) placement via `GetWindowPlacement` rather than the iconified coordinates.
 - **Fallback:** missing file, corrupt JSON, size below the 300x150 client minimum, absurd coordinates, or a restored top-left that appears off-screen → default **400x200** client size (re-centered when possible) with tab **one** selected.
 
 ### Reset to defaults

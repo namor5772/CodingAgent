@@ -5,7 +5,7 @@ $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppExe = Join-Path $RepoRoot "hello_world_cpp.exe"
 $IconPath = Join-Path $RepoRoot "hello_world.ico"
 
-if (-not (Test-Path $AppExe)) {
+if (-not (Test-Path -LiteralPath $AppExe)) {
     throw "App exe not found: $AppExe`nBuild it first: powershell -NoProfile -ExecutionPolicy Bypass -File .\build_cpp.ps1"
 }
 
@@ -20,7 +20,7 @@ $Sc.Arguments = ""
 $Sc.WorkingDirectory = $RepoRoot
 $Sc.WindowStyle = 1
 $Sc.Description = "Hello World - Win32 C++ demo"
-if (Test-Path $IconPath) {
+if (Test-Path -LiteralPath $IconPath) {
     $Sc.IconLocation = "$IconPath,0"
 }
 $Sc.Save()

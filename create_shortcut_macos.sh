@@ -119,14 +119,19 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 # Launcher: cd to repo root so relative assets resolve; exec python (no Terminal.app).
-cat > "$APP_DIR/Contents/MacOS/$EXEC_NAME" <<EOF
-#!/bin/bash
-PYTHON="$PYTHON"
-SCRIPT="$APP_SCRIPT"
-[ -x "\$PYTHON" ] || PYTHON="\$(/usr/bin/command -v python3 || echo /usr/bin/python3)"
+# Paths are baked in with %q so any shell metacharacters in them stay literal when
+# the generated launcher is executed later.
+{
+  printf '#!/bin/bash\n'
+  printf 'PYTHON=%q\n' "$PYTHON"
+  printf 'SCRIPT=%q\n' "$APP_SCRIPT"
+  printf 'REPO_ROOT=%q\n' "$REPO_ROOT"
+  cat <<'EOF'
+[ -x "$PYTHON" ] || PYTHON="$(/usr/bin/command -v python3 || echo /usr/bin/python3)"
 cd "$REPO_ROOT"
-exec "\$PYTHON" "\$SCRIPT" "\$@"
+exec "$PYTHON" "$SCRIPT" "$@"
 EOF
+} > "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
 if [[ -f "$ICON_ICNS" ]]; then

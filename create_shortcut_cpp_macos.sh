@@ -73,12 +73,17 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 # Launcher: WorkingDirectory = repo root so hello_world.icns resolves next to the binary.
-cat > "$APP_DIR/Contents/MacOS/$EXEC_NAME" <<EOF
-#!/bin/bash
-BIN="$APP_EXE"
+# Paths are baked in with %q so any shell metacharacters in them stay literal when
+# the generated launcher is executed later.
+{
+  printf '#!/bin/bash\n'
+  printf 'BIN=%q\n' "$APP_EXE"
+  printf 'REPO_ROOT=%q\n' "$REPO_ROOT"
+  cat <<'EOF'
 cd "$REPO_ROOT"
-exec "\$BIN" "\$@"
+exec "$BIN" "$@"
 EOF
+} > "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 chmod +x "$APP_DIR/Contents/MacOS/$EXEC_NAME"
 
 if [[ -f "$ICON_ICNS" ]]; then

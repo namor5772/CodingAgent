@@ -89,37 +89,6 @@ def save_geometry(x: int, y: int, w: int, h: int, tab: int = 0) -> None:
         pass
 
 
-def _parse_geometry(geo: str) -> tuple[int, int, int, int] | None:
-    """Parse Tk geometry 'WxH+X+Y' (X/Y may use '-' for negative)."""
-    try:
-        x_sep = -1
-        for i, ch in enumerate(geo):
-            if ch in "+-" and i > 0 and geo[i - 1].isdigit():
-                # First sign after WxH separates width/height from x.
-                # Require the left side to contain 'x' so we don't trip on nothing.
-                if "x" in geo[:i]:
-                    x_sep = i
-                    break
-        if x_sep < 0:
-            return None
-        wh = geo[:x_sep]
-        rest = geo[x_sep:]
-        w_str, _, h_str = wh.partition("x")
-        w = int(w_str)
-        h = int(h_str)
-        # rest is like "+120+80", "-10+20", "+120-40", "-10-20"
-        i = 1  # skip first sign
-        while i < len(rest) and rest[i] not in "+-":
-            i += 1
-        if i >= len(rest):
-            return None
-        x = int(rest[:i])
-        y = int(rest[i:])
-        return x, y, w, h
-    except ValueError:
-        return None
-
-
 def walk_pose(phase: float) -> dict[str, float]:
     """Return limb angles (radians) for a bipedal walk cycle.
 
@@ -259,14 +228,26 @@ class WalkerApp:
         self.bird_alt = 0.0  # px climbed since takeoff (0 = perched)
         self.bird_flap = 0.0
         self._after_id: str | None = None
+        self._shutting_down = False
         self._geometry_checked = False
+        self._last_canvas_size: tuple[int, int, int, int] | None = None
         self.root.bind("<Configure>", self._on_configure)
         self._tick()
 
     def _on_configure(self, _event: tk.Event | None = None) -> None:
-        # Redraw immediately on resize so the figure stays centered vertically.
-        self._draw()
-        self._draw_chase()
+        # <Configure> also fires on window moves (via the toplevel bindtag); only
+        # redraw when a canvas actually changed size — moves don't alter the scene.
+        size = (
+            int(self.canvas.winfo_width()),
+            int(self.canvas.winfo_height()),
+            int(self.canvas_two.winfo_width()),
+            int(self.canvas_two.winfo_height()),
+        )
+        if size != self._last_canvas_size:
+            self._last_canvas_size = size
+            # Redraw immediately on resize so the figure stays centered vertically.
+            self._draw()
+            self._draw_chase()
         # First real map/resize: if restored coords are off-screen, re-center defaults.
         if not self._geometry_checked:
             try:
@@ -306,17 +287,13 @@ class WalkerApp:
         """Write current window position, size, and selected tab for the next launch."""
         try:
             self.root.update_idletasks()
-            # Prefer parsing geometry() ("WxH+X+Y", X/Y may be negative) so we
-            # round-trip the same values Tk accepts on the next geometry() call.
-            geo = self.root.geometry()
-            parsed = _parse_geometry(geo)
-            if parsed is not None:
-                x, y, w, h = parsed
-            else:
-                x = int(self.root.winfo_x())
-                y = int(self.root.winfo_y())
-                w = int(self.root.winfo_width())
-                h = int(self.root.winfo_height())
+            # winfo_* report absolute root coordinates; parsing geometry() instead
+            # would misread Tk's right/bottom-relative "WxH-X+Y" form as negative
+            # absolute offsets and corrupt the saved position.
+            x = int(self.root.winfo_x())
+            y = int(self.root.winfo_y())
+            w = int(self.root.winfo_width())
+            h = int(self.root.winfo_height())
             try:
                 tab = self.notebook.index(self.notebook.select())
             except (tk.TclError, ValueError):
@@ -326,19 +303,32 @@ class WalkerApp:
             pass
 
     def _tick(self) -> None:
-        self.phase = (self.phase + 0.045) % 1.0
-        w = max(self.canvas.winfo_width(), 1)
-        h = max(self.canvas.winfo_height(), 1)
-        # Scale speed lightly with width so a lap takes a similar time.
-        speed = WALK_SPEED * max(w / 400.0, 0.75)
-        self.x += speed
-        # Wrap only once the trailing dog (tail ~90 px behind at scale 1) has
-        # also left the right edge; both re-enter from the left, man first.
-        if self.x > w + 40 + 90 * view_scale(w, h):
-            self.x = -40.0
-        self._draw()
-        self._tick_chase()
-        self._after_id = self.root.after(FRAME_MS, self._tick)
+        try:
+            self.phase = (self.phase + 0.045) % 1.0
+            w = max(self.canvas.winfo_width(), 1)
+            h = max(self.canvas.winfo_height(), 1)
+            # Before the first real Configure the canvas reports width 1; advancing
+            # then would trip the wrap below and snap x back to -40 for a frame.
+            if w > 1:
+                # Scale speed lightly with width so a lap takes a similar time.
+                speed = WALK_SPEED * max(w / 400.0, 0.75)
+                self.x += speed
+                # Wrap only once the trailing dog (tail ~90 px behind at scale 1)
+                # has also left the right edge; both re-enter from the left, man first.
+                if self.x > w + 40 + 90 * view_scale(w, h):
+                    self.x = -40.0
+            self._draw()
+            self._tick_chase()
+        except Exception:
+            # A bad frame (transient TclError, math edge case) must not kill the
+            # animation loop: fall through and still schedule the next tick.
+            pass
+        if not self._shutting_down:
+            try:
+                self._after_id = self.root.after(FRAME_MS, self._tick)
+            except tk.TclError:
+                # Root went away (teardown raced the timer): stop quietly.
+                self._after_id = None
 
     def _draw(self) -> None:
         c = self.canvas
@@ -666,6 +656,7 @@ class WalkerApp:
         )
 
     def shutdown(self) -> None:
+        self._shutting_down = True
         if self._after_id is not None:
             self.root.after_cancel(self._after_id)
             self._after_id = None
